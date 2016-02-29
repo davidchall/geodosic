@@ -117,31 +117,26 @@ class DicomImage(DicomBase):
                         frames = self.ds.pixel_array.shape[0]
         return frames
 
-    def GetPatientToPixelLUT(self):
-        """Get the image transformation matrix from the DICOM standard Part 3
-            Section C.7.6.2.1.1"""
+    def GetXYZ(self):
+        """Return coordinate vectors.
+
+        Returns:
+            x, y, z: numpy.ndarray
+        """
+
+        #  transformation taken from http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.2.html#sect_C.7.6.2.1.1
 
         di = self.ds.PixelSpacing[0]
         dj = self.ds.PixelSpacing[1]
-        orientation = self.ds.ImageOrientationPatient
+        cosi = self.ds.ImageOrientationPatient[:3]
+        cosj = self.ds.ImageOrientationPatient[3:]
         position = self.ds.ImagePositionPatient
 
-        m = np.matrix(
-            [[orientation[0]*di, orientation[3]*dj, 0, position[0]],
-            [orientation[1]*di, orientation[4]*dj, 0, position[1]],
-            [orientation[2]*di, orientation[5]*dj, 0, position[2]],
-            [0, 0, 0, 1]])
+        x = position[0] + cosi[0] * di * np.arange(0, self.ds.Columns)
+        y = position[1] + cosj[1] * dj * np.arange(0, self.ds.Rows)
+        z = position[2] + cosi[0] * np.array(self.ds.GridFrameOffsetVector)
 
-        x = []
-        y = []
-        for i in range(0, self.ds.Columns):
-            imat = m * np.matrix([[i], [0], [0], [1]])
-            x.append(float(imat[0]))
-        for j in range(0, self.ds.Rows):
-            jmat = m * np.matrix([[0], [j], [0], [1]])
-            y.append(float(jmat[1]))
-
-        return (np.array(x), np.array(y))
+        return x, y, z
 
 
 class RTDose(DicomImage):
@@ -159,12 +154,7 @@ class RTDose(DicomImage):
 
         return x, y
 
-    def GetXYZ(self):
-        x, y = self.GetPatientToPixelLUT()
 
-        position = self.ds.ImagePositionPatient[2]
-        orientation = self.ds.ImageOrientationPatient[0]
-        z = orientation * np.array(self.ds.GridFrameOffsetVector) + position
 
         return x, y, z
 
