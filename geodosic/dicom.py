@@ -154,12 +154,14 @@ class RTDose(DicomImage):
 
         return x, y
 
+    def GetDoseArray(self):
+        scale = self.ds.DoseGridScaling
+        distribution = np.transpose(self.ds.pixel_array, axes=(2,1,0))
+        return scale * distribution
 
 
         return x, y, z
 
-    def GetDoseArray(self):
-        return np.transpose(self.ds.pixel_array, axes=(2,1,0))
 
 
 class RTStruct(DicomBase):
