@@ -8,6 +8,8 @@ try:
 except ImportError:
     from dicom import read_file as pydicom_read_file
 
+from .geometry import cartesian_product
+
 
 CT_UID = '1.2.840.10008.5.1.4.1.1.2'
 RTDOSE_UID = '1.2.840.10008.5.1.4.1.1.481.2'
@@ -188,14 +190,20 @@ class RTStruct(DicomBase):
 
         return True
 
-    def GetStructureMask(self, name, x_grid, y_grid, z_grid):
+    def GetStructureMask(self, name, grid):
+        """Compute a mask indicating the presence of a structure upon a grid.
+
+        Parameters:
+            name: structure name
+            grid: 3-tuple of numpy.ndarray with shapes (m1,), (m2,) and (m3,)
+                They are the x, y and z coordinate vectors.
+
+        Returns:
+            mask: numpy.ndarray of bool with shape (m1, m2, m3)
+        """
 
         if self.IsEmptyStructure(name):
             return None
-
-        xx, yy = np.meshgrid(np.array(x_grid), np.array(y_grid))
-        xx, yy = xx.flatten(), yy.flatten()
-        grid_points = np.vstack((xx, yy)).T
 
         for roi in self.ds.ROIContourSequence:
             if roi.ReferencedROINumber == self._name_table[name]:
@@ -212,21 +220,37 @@ class RTStruct(DicomBase):
             contour_points[i] = np.delete(data, np.arange(2, data.size, 3))
             contour_points[i] = np.reshape(contour_points[i], (-1,2))
 
-        # TODO: can I get performance improvement using PIL instead of mpl?
-        # http://stackoverflow.com/questions/3654289/scipy-create-2d-polygon-mask
-        mask = np.empty((len(x_grid), len(y_grid), len(z_grid)), dtype=bool)
-        for i, z_i in enumerate(z_grid):
+
+        x, y, z = grid
+        points_2d = cartesian_product((x, y))
+        mask_3d = np.empty((x.size, y.size, z.size), dtype=bool)
+
+        for i, z_i in enumerate(z):
             #  TODO: loosen this, to use contour in one slice either side
             if z_i < np.amin(z_contour) or z_i > np.amax(z_contour):
                 continue
-            # maybe shrink grid_points to bounding box for speedup?
-            closest_contour = np.argmin(np.fabs(z_contour - z_i))
-            c = matplotlib.path.Path(contour_points[closest_contour])
-            mask_slice = c.contains_points(grid_points)
-            mask_slice = mask_slice.reshape((len(y_grid), len(x_grid)))
-            mask[:,:,i] = mask_slice.T
 
-        return mask
+            closest_contour = np.argmin(np.fabs(z_contour - z_i))
+            polygon_points = contour_points[closest_contour]
+
+            # find bounding box for polygon
+            bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
+            bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
+
+            bb_mask_flat = (points_2d[:,0] > bb_min_x) & \
+                           (points_2d[:,0] < bb_max_x) & \
+                           (points_2d[:,1] > bb_min_y) & \
+                           (points_2d[:,1] < bb_max_y)
+
+            bb_mask = bb_mask_flat.reshape((x.size, y.size))
+
+            # check if points in bounding box are within polygon
+            polygon = matplotlib.path.Path(polygon_points)
+            mask_2d = polygon.contains_points(points_2d[bb_mask_flat])
+
+            mask_3d[bb_mask,i] = mask_2d
+
+        return mask_3d
 
 
 class RTPlan(DicomBase):
