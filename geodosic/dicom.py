@@ -1,8 +1,6 @@
 # third-party imports
 from six import PY2
-from six.moves import reduce
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
 import matplotlib.path
 
 try:
@@ -156,44 +154,14 @@ class RTDose(DicomImage):
 
         return x, y
 
+    def IsRegularGrid(self):
+        """Return whether grid has regular spacing."""
+        return not any(np.diff(np.diff(self.ds.GridFrameOffsetVector)))
+
     def GetDoseArray(self):
         scale = self.ds.DoseGridScaling
-        distribution = np.transpose(self.ds.pixel_array, axes=(2,1,0))
+        distribution = np.transpose(self.ds.pixel_array, axes=(2, 1, 0))
         return scale * distribution
-
-    def InterpolateDoseArray(self, x, y, z):
-        """Interpolate the dose array onto a new coordinate grid.
-        Dose is set to zero beyond the bounds of the original array.
-
-        Parameters:
-            x, y, z: coordinate vectors of new grid
-        """
-        x_i, y_i, z_i = self.GetXYZ()
-        dose_i = self.GetDoseArray()
-
-        interpolator = RegularGridInterpolator((x_i, y_i, z_i), dose_i,
-            bounds_error=False, fill_value=0)
-
-        dose = interpolator(self._cartesian([x, y, z]))
-        return dose.reshape(x.size, y.size, z.size)
-
-    def _cartesian(self, arrays):
-        """Returns an array of Cartesian coordinates, describing a grid
-        built from the input coordinate vectors.
-
-        Parameters:
-            x1, x2, ..., xn: coordinate vectors
-        """
-        # from http://stackoverflow.com/a/11146645/2669425
-        broadcastable = np.ix_(*arrays)
-        broadcasted = np.broadcast_arrays(*broadcastable)
-        rows, cols = reduce(np.multiply, broadcasted[0].shape), len(broadcasted)
-        out = np.empty(rows * cols, dtype=broadcasted[0].dtype)
-        start, end = 0, rows
-        for a in broadcasted:
-            out[start:end] = a.reshape(-1)
-            start, end = end, end + rows
-        return out.reshape(cols, rows).T
 
 
 class RTStruct(DicomBase):
