@@ -1,5 +1,6 @@
 # third-party imports
 from six import PY2
+import logging
 import numpy as np
 import matplotlib.path
 
@@ -8,6 +9,7 @@ try:
 except ImportError:
     from dicom import read_file as pydicom_read_file
 
+# project imports
 from .geometry import cartesian_product
 
 
@@ -168,25 +170,32 @@ class RTDose(DicomImage):
 
 class RTStruct(DicomBase):
     """docstring for RTStruct"""
+
     def __init__(self, ds):
         super(RTStruct, self).__init__(ds)
 
-        if 'StructureSetROISequence' in self.ds:
-            structs = self.ds.StructureSetROISequence
-            self._name_table = dict((s.ROIName, s.ROINumber) for s in structs)
+        contour_keys = ('StructureSetROISequence', 'ROIContourSequence')
+        if not all(k in self.ds for k in contour_keys):
+            raise IOError('RTStruct file contains zero structures')
+
+        self._roi_lookup = {}
+        for s in self.ds.StructureSetROISequence:
+            if s.ROIName in self._roi_lookup:
+                logging.warning('Found multiple "%s" structures' % s.ROIName)
+            else:
+                self._roi_lookup[s.ROIName] = s.ROINumber
 
     def GetAvailableStructureNames(self):
         """Return a list of available structure names."""
 
-        return self._name_table.keys()
+        return self._roi_lookup.keys()
 
     def IsEmptyStructure(self, name):
         """Return whether a given structure is empty."""
 
-        if 'ROIContourSequence' in self.ds:
-            for roi in self.ds.ROIContourSequence:
-                if roi.ReferencedROINumber == self._name_table[name]:
-                    return 'ContourSequence' not in roi
+        for roi in self.ds.ROIContourSequence:
+            if roi.ReferencedROINumber == self._roi_lookup[name]:
+                return 'ContourSequence' not in roi
 
         return True
 
@@ -206,7 +215,7 @@ class RTStruct(DicomBase):
             return None
 
         for roi in self.ds.ROIContourSequence:
-            if roi.ReferencedROINumber == self._name_table[name]:
+            if roi.ReferencedROINumber == self._roi_lookup[name]:
                 contours = roi.ContourSequence
 
         # TODO: there may be multiple contours per z coordinate
@@ -218,8 +227,7 @@ class RTStruct(DicomBase):
             data = np.array(c.ContourData)
             z_contour.append(data[2])
             contour_points[i] = np.delete(data, np.arange(2, data.size, 3))
-            contour_points[i] = np.reshape(contour_points[i], (-1,2))
-
+            contour_points[i] = np.reshape(contour_points[i], (-1, 2))
 
         x, y, z = grid
         points_2d = cartesian_product((x, y))
@@ -237,10 +245,10 @@ class RTStruct(DicomBase):
             bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
             bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
 
-            bb_mask_flat = (points_2d[:,0] > bb_min_x) & \
-                           (points_2d[:,0] < bb_max_x) & \
-                           (points_2d[:,1] > bb_min_y) & \
-                           (points_2d[:,1] < bb_max_y)
+            bb_mask_flat = (points_2d[:, 0] > bb_min_x) & \
+                           (points_2d[:, 0] < bb_max_x) & \
+                           (points_2d[:, 1] > bb_min_y) & \
+                           (points_2d[:, 1] < bb_max_y)
 
             bb_mask = bb_mask_flat.reshape((x.size, y.size))
 
@@ -248,7 +256,7 @@ class RTStruct(DicomBase):
             polygon = matplotlib.path.Path(polygon_points)
             mask_2d = polygon.contains_points(points_2d[bb_mask_flat])
 
-            mask_3d[bb_mask,i] = mask_2d
+            mask_3d[bb_mask, i] = mask_2d
 
         return mask_3d
 
