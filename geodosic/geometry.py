@@ -63,8 +63,8 @@ def cartesian_product(arrays):
         arrays: tuple of numpy.ndarray, with shapes (m1,), ..., (mn,)
 
     Returns:
-        points: numpy.ndarray with shape (m1, ..., mn), where each element is
-            an n-tuple containing the coordinates for that point
+        points: numpy.ndarray with shape (m1 * ... * mn, n), where each element
+            is an n-tuple containing the coordinates for that point
     """
     # implementation from http://stackoverflow.com/a/11146645/2669425
     broadcastable = np.ix_(*arrays)

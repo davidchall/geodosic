@@ -127,9 +127,6 @@ class DicomImage(DicomBase):
         Returns:
             x, y, z: numpy.ndarray
         """
-
-        #  transformation taken from http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.2.html#sect_C.7.6.2.1.1
-
         di = self.ds.PixelSpacing[0]
         dj = self.ds.PixelSpacing[1]
         cosi = self.ds.ImageOrientationPatient[:3]
@@ -200,7 +197,8 @@ class RTStruct(DicomBase):
         return True
 
     def GetStructureMask(self, name, grid):
-        """Compute a mask indicating the presence of a structure upon a grid.
+        """Compute a mask indicating the presence of a 3D structure
+        upon a 3D grid.
 
         Parameters:
             name: structure name
@@ -227,11 +225,41 @@ class RTStruct(DicomBase):
             data = np.array(c.ContourData)
             z_contour.append(data[2])
             contour_points[i] = np.delete(data, np.arange(2, data.size, 3))
-            contour_points[i] = np.reshape(contour_points[i], (-1, 2))
+            contour_points[i] = np.reshape(contour_points[i], (-1,2))
+
+        def get_polygon_mask(polygon_points, grid_points):
+            """Compute a mask indicating the presence of a 2D polygon
+            upon a 2D grid.
+
+            Parameters:
+                polygon_points: numpy.ndarray with shape (p, 2)
+                grid_points: numpy.ndarray with shape (m, 2)
+
+            Returns:
+                mask: numpy.ndarray of bool with shape (m,)
+            """
+            # find bounding box for polygon
+            bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
+            bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
+
+            bb_mask = (grid_points[:,0] > bb_min_x) & \
+                      (grid_points[:,0] < bb_max_x) & \
+                      (grid_points[:,1] > bb_min_y) & \
+                      (grid_points[:,1] < bb_max_y)
+
+            # check if points in bounding box are within polygon
+            polygon = matplotlib.path.Path(polygon_points)
+            bb_polygon_mask = polygon.contains_points(grid_points[bb_mask])
+
+            # set the mask values within the bounding box on the grid
+            polygon_mask = np.zeros_like(bb_mask, dtype=bool)
+            polygon_mask[bb_mask] = bb_polygon_mask
+
+            return polygon_mask
 
         x, y, z = grid
         points_2d = cartesian_product((x, y))
-        mask_3d = np.empty((x.size, y.size, z.size), dtype=bool)
+        mask_3d = np.zeros((x.size, y.size, z.size), dtype=bool)
 
         for i, z_i in enumerate(z):
             #  TODO: loosen this, to use contour in one slice either side
@@ -240,23 +268,9 @@ class RTStruct(DicomBase):
 
             closest_contour = np.argmin(np.fabs(z_contour - z_i))
             polygon_points = contour_points[closest_contour]
+            polygon_mask = get_polygon_mask(polygon_points, points_2d)
 
-            # find bounding box for polygon
-            bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
-            bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
-
-            bb_mask_flat = (points_2d[:, 0] > bb_min_x) & \
-                           (points_2d[:, 0] < bb_max_x) & \
-                           (points_2d[:, 1] > bb_min_y) & \
-                           (points_2d[:, 1] < bb_max_y)
-
-            bb_mask = bb_mask_flat.reshape((x.size, y.size))
-
-            # check if points in bounding box are within polygon
-            polygon = matplotlib.path.Path(polygon_points)
-            mask_2d = polygon.contains_points(points_2d[bb_mask_flat])
-
-            mask_3d[bb_mask, i] = mask_2d
+            mask_3d[:,:,i] = polygon_mask.reshape((x.size, y.size))
 
         return mask_3d
 
