@@ -1,6 +1,11 @@
+# system imports
+import os
+import re
+import fnmatch
+import logging
+
 # third-party imports
 from six import PY2
-import logging
 import numpy as np
 import matplotlib.path
 
@@ -17,6 +22,136 @@ CT_UID = '1.2.840.10008.5.1.4.1.1.2'
 RTDOSE_UID = '1.2.840.10008.5.1.4.1.1.481.2'
 RTPLAN_UID = '1.2.840.10008.5.1.4.1.1.481.5'
 RTSTRUCT_UID = '1.2.840.10008.5.1.4.1.1.481.3'
+
+
+class DicomCollection(object):
+    """A class that provides an interface to a collection of DICOM files,
+    representing a single patient.
+    """
+
+    def __init__(self, paths, skip_check=False):
+        """Constructor for DicomCollection.
+
+        Parameters:
+            paths: list of paths to DICOM files and/or directories.
+                Directories will be recursively searched for DICOM files.
+            skip_check: disable validation that files are from a single study
+        """
+
+        dicom_files = [paths] if isinstance(paths, str) else paths
+
+        # build regex that case-insensitively matches file extensions
+        dicom_ext = ['dcm', 'dicom']
+        regex = '|'.join(fnmatch.translate('*.'+ext) for ext in dicom_ext)
+        reobj = re.compile('('+regex+')', re.IGNORECASE)
+
+        # replace directories their files
+        dicom_dirs = [p for p in dicom_files if os.path.isdir(p)]
+        for p in dicom_dirs:
+            dicom_files.remove(p)
+            for root, dirs, files in os.walk(p, topdown=True):
+                dicom_files += [os.path.join(root, f) for f in files
+                                if re.match(reobj, f)]
+
+        # remove any duplicates
+        dicom_files = list(set(dicom_files))
+
+        # read DICOM files
+        # TODO: support RTPLAN and CT
+        self.rtdose, self.rtss = [], []
+        for fname in dicom_files:
+            ds = pydicom_read_file(fname, defer_size=100, force=True)
+
+            if 'SOPClassUID' not in ds:
+                logging.warning('Not a valid DICOM file: %s' % fname)
+                continue
+
+            if ds.SOPClassUID == RTDOSE_UID:
+                self.rtdose.append(RTDose(ds))
+            elif ds.SOPClassUID == RTSTRUCT_UID:
+                self.rtss.append(RTStruct(ds))
+            elif ds.SOPClassUID == RTPLAN_UID:
+                pass
+            elif ds.SOPClassUID == CT_UID:
+                pass
+            else:
+                logging.warning('Unsupported DICOM SOP class: %s' % fname)
+
+        # TODO: validate files are from the same study
+        if not skip_check:
+            pass
+
+
+    def structure_names(self):
+        """Returns list of available structures."""
+        return set(x for ss in self.rtss for x in ss.structure_names())
+
+
+    def structure_mask(self, name, grid):
+        index = self._find_structure(name)
+        if index is None:
+            return None
+        else:
+            return self.rtss[index].structure_mask(name, grid)
+
+
+    def dose_names(self):
+        """Returns list of available doses."""
+        return set(dose.dose_name() for dose in self.rtdose)
+
+
+    def dose_grid_vectors(self, name):
+        index = self._find_dose(name)
+        if index is None:
+            return None
+        else:
+            return self.rtdose[index].grid_vectors()
+
+
+    def dose_grid_spacing(self, name):
+        index = self._find_dose(name)
+        if index is None:
+            return None
+        else:
+            return self.rtdose[index].grid_spacing()
+
+
+    def dose_array(self, name):
+        index = self._find_dose(name)
+        if index is None:
+            return None
+        else:
+            return self.rtdose[index].dose_array()
+
+
+    def _find_structure(self, name):
+        """Returns index for RTSS file containing the desired structure.
+        """
+        found = [name in ss.structure_names() for ss in self.rtss]
+
+        if sum(found) == 0:
+            logging.error('Unable to find structure "%s"' % name)
+            return None
+        if sum(found) >= 2:
+            logging.warning('Found multiple "%s" structures' % name)
+
+        first_found = next((i for i, x in enumerate(found) if x), None)
+        return first_found
+
+
+    def _find_dose(self, name):
+        """Returns index for RTDOSE file containing the desired dose.
+        """
+        found = [name == dose.dose_name() for dose in self.rtdose]
+
+        if sum(found) == 0:
+            logging.error('Unable to find dose "%s"' % name)
+            return None
+        if sum(found) >= 2:
+            logging.warning('Found multiple "%s" doses' % name)
+
+        first_found = next((i for i, x in enumerate(found) if x), None)
+        return first_found
 
 
 def read_file(filename):
@@ -72,6 +207,52 @@ class DicomBase(object):
 
         return patient
 
+    def GetStudyInfo(self):
+        """Return the study information of the current file."""
+
+        study = {}
+        if 'StudyDescription' in self.ds:
+            desc = self.ds.StudyDescription
+        else:
+            desc = 'No description'
+        study['description'] = desc
+        if 'StudyDate' in self.ds:
+            date = self.ds.StudyDate
+        else:
+            date = None
+        study['date'] = date
+        # Don't assume that every dataset includes a study UID
+        if 'StudyInstanceUID' in self.ds:
+            study['id'] = self.ds.StudyInstanceUID
+        else:
+            study['id'] = str(random.randint(0, 65535))
+
+        return study
+
+    def GetSeriesInfo(self):
+        """Return the series information of the current file."""
+
+        series = {}
+        if 'SeriesDescription' in self.ds:
+            desc = self.ds.SeriesDescription
+        else:
+            desc = 'No description'
+        series['description'] = desc
+        series['id'] = self.ds.SeriesInstanceUID
+        # Don't assume that every dataset includes a study UID
+        series['study'] = self.ds.SeriesInstanceUID
+        if 'StudyInstanceUID' in self.ds:
+            series['study'] = self.ds.StudyInstanceUID
+        series['referenceframe'] = self.ds.FrameOfReferenceUID \
+            if 'FrameOfReferenceUID' in self.ds \
+            else str(random.randint(0, 65535))
+        if 'Modality' in self.ds:
+            series['modality'] = self.ds.Modality
+        else:
+            series['modality'] = 'OT'
+
+        return series
+
 
 class DicomImage(DicomBase):
 
@@ -121,7 +302,8 @@ class DicomImage(DicomBase):
                         frames = self.ds.pixel_array.shape[0]
         return frames
 
-    def GetXYZ(self):
+
+    def grid_vectors(self):
         """Return coordinate vectors.
 
         Returns:
@@ -142,24 +324,31 @@ class DicomImage(DicomBase):
 
 class RTDose(DicomImage):
     """docstring for RTDose"""
+
     def __init__(self, ds):
         super(RTDose, self).__init__(ds)
 
-    def GetAspectRatio(self):
-        """Returns the aspect ratio of the image.
+
+    def dose_name(self):
+        return self.ds.SeriesDescription
+
+
+    def grid_spacing(self):
+        """Return the smallest spacing present in the grid.
+
+        Note that non-regular grids have variable spacing.
         """
-        if 'PixelSpacing' in self.ds:
-            x, y = self.ds.PixelSpacing
-        else:
-            x, y = 1, 1
+        dx, dy = self.ds.PixelSpacing
+        dz = np.min(np.diff(self.ds.GridFrameOffsetVector))
+        return dx, dy, dz
 
-        return x, y
 
-    def IsRegularGrid(self):
+    def is_regular_grid(self):
         """Return whether grid has regular spacing."""
         return not any(np.diff(np.diff(self.ds.GridFrameOffsetVector)))
 
-    def GetDoseArray(self):
+
+    def dose_array(self):
         scale = self.ds.DoseGridScaling
         distribution = np.transpose(self.ds.pixel_array, axes=(2, 1, 0))
         return scale * distribution
@@ -182,12 +371,12 @@ class RTStruct(DicomBase):
             else:
                 self._roi_lookup[s.ROIName] = s.ROINumber
 
-    def GetAvailableStructureNames(self):
-        """Return a list of available structure names."""
 
+    def structure_names(self):
         return self._roi_lookup.keys()
 
-    def IsEmptyStructure(self, name):
+
+    def is_empty_structure(self, name):
         """Return whether a given structure is empty."""
 
         for roi in self.ds.ROIContourSequence:
@@ -196,7 +385,8 @@ class RTStruct(DicomBase):
 
         return True
 
-    def GetStructureMask(self, name, grid):
+
+    def structure_mask(self, name, grid):
         """Compute a mask indicating the presence of a 3D structure
         upon a 3D grid.
 
@@ -209,7 +399,7 @@ class RTStruct(DicomBase):
             mask: numpy.ndarray of bool with shape (m1, m2, m3)
         """
 
-        if self.IsEmptyStructure(name):
+        if self.is_empty_structure(name):
             return None
 
         for roi in self.ds.ROIContourSequence:
