@@ -477,9 +477,13 @@ class CT(DicomBase):
         return dx, dy, dz
 
     def HU_array(self):
+
         if 'RescaleSlope' in self.ds and 'RescaleIntercept' in self.ds:
-            HU = self.ds.pixel_array * self.ds.RescaleSlope \
-                + self.ds.RescaleIntercept
+            scale = self.ds.RescaleSlope
+            offset = self.ds.RescaleIntercept
         else:
-            HU = self.ds.pixel_array
-        return HU
+            scale = 1.0
+            offset = 0.0
+
+        distribution = np.transpose(self.ds.pixel_array)
+        return scale * distribution + offset
