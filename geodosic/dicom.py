@@ -58,7 +58,7 @@ class DicomCollection(object):
 
         # read DICOM files
         # TODO: support RTPLAN and CT
-        self.rtdose, self.rtss = [], []
+        self.rtdose, self.rtss, self.rtplan, self.ct = [], [], [], []
         for fname in dicom_files:
             ds = pydicom_read_file(fname, defer_size=100, force=True)
 
@@ -71,21 +71,22 @@ class DicomCollection(object):
             elif ds.SOPClassUID == RTSTRUCT_UID:
                 self.rtss.append(RTStruct(ds))
             elif ds.SOPClassUID == RTPLAN_UID:
-                pass
+                self.rtplan.append(RTPlan(ds))
             elif ds.SOPClassUID == CT_UID:
-                pass
+                self.ct.append(CT(ds))
             else:
                 logging.warning('Unsupported DICOM SOP class: %s' % fname)
+
+        # sort CT files by z value
+        self.ct = sorted(self.ct, key=lambda x: x.grid_vectors()[2])
 
         # TODO: validate files are from the same study
         if not skip_check:
             pass
 
-
     def structure_names(self):
         """Returns list of available structures."""
         return set(x for ss in self.rtss for x in ss.structure_names())
-
 
     def structure_mask(self, name, grid):
         index = self._find_structure(name)
@@ -94,11 +95,9 @@ class DicomCollection(object):
         else:
             return self.rtss[index].structure_mask(name, grid)
 
-
     def dose_names(self):
         """Returns list of available doses."""
         return set(dose.dose_name() for dose in self.rtdose)
-
 
     def dose_grid_vectors(self, name):
         index = self._find_dose(name)
@@ -107,14 +106,12 @@ class DicomCollection(object):
         else:
             return self.rtdose[index].grid_vectors()
 
-
     def dose_grid_spacing(self, name):
         index = self._find_dose(name)
         if index is None:
             return None
         else:
             return self.rtdose[index].grid_spacing()
-
 
     def dose_array(self, name):
         index = self._find_dose(name)
@@ -123,6 +120,30 @@ class DicomCollection(object):
         else:
             return self.rtdose[index].dose_array()
 
+    def ct_grid_vectors(self):
+        z_tot = np.array([])
+        x_ref, y_ref, z_ref = self.ct[0].grid_vectors()
+        for ct in self.ct:
+            x, y, z = ct.grid_vectors()
+            if not np.allclose(x, x_ref) or not np.allclose(y, y_ref):
+                logging.error('CT pixel locations vary between slices')
+            z_tot = np.append(z_tot, z)
+
+        return x_ref, y_ref, np.sort(z_tot)
+
+    def ct_grid_spacing(self):
+        dz_min = np.inf
+        dx_ref, dy_ref, dz_ref = self.ct[0].grid_spacing()
+        for ct in self.ct:
+            dx, dy, dz = ct.grid_spacing()
+            if not np.isclose(dx, dx_ref) or not np.isclose(dy, dy_ref):
+                logging.error('CT pixel spacing varies between slices')
+            dz_min = min(dz_min, dz)
+
+        return dx_ref, dy_ref, dz_min
+
+    def ct_array(self):
+        return np.dstack(ct.HU_array() for ct in self.ct)
 
     def _find_structure(self, name):
         """Returns index for RTSS file containing the desired structure.
@@ -137,7 +158,6 @@ class DicomCollection(object):
 
         first_found = next((i for i, x in enumerate(found) if x), None)
         return first_found
-
 
     def _find_dose(self, name):
         """Returns index for RTDOSE file containing the desired dose.
@@ -166,6 +186,8 @@ def read_file(filename):
         return RTPlan(ds)
     elif ds.SOPClassUID == RTSTRUCT_UID:
         return RTStruct(ds)
+    elif ds.SOPClassUID == CT_UID:
+        return CT(ds)
     else:
         raise IOError('Unsupported DICOM SOP class: %s' % filename)
 
@@ -254,54 +276,14 @@ class DicomBase(object):
         return series
 
 
-class DicomImage(DicomBase):
+class RTDose(DicomBase):
+    """docstring for RTDose"""
 
     def __init__(self, ds):
-        super(DicomImage, self).__init__(ds)
+        super(RTDose, self).__init__(ds)
 
-    def GetImageInfo(self):
-        """Return the image metadata."""
-
-        data = {}
-
-        if 'ImagePositionPatient' in self.ds:
-            data['position'] = self.ds.ImagePositionPatient
-        if 'ImageOrientationPatient' in self.ds:
-            data['orientation'] = self.ds.ImageOrientationPatient
-        if 'PixelSpacing' in self.ds:
-            data['pixelspacing'] = self.ds.PixelSpacing
-        else:
-            data['pixelspacing'] = [1, 1]
-        data['rows'] = self.ds.Rows
-        data['columns'] = self.ds.Columns
-        data['samplesperpixel'] = self.ds.SamplesPerPixel
-        data['photometricinterpretation'] = self.ds.PhotometricInterpretation
-        data['littlendian'] = \
-            self.ds.file_meta.TransferSyntaxUID.is_little_endian
-        if 'PatientPosition' in self.ds:
-            data['patientposition'] = self.ds.PatientPosition
-        data['frames'] = self.GetNumberOfFrames()
-
-        return data
-
-    def GetNumberOfFrames(self):
-        """Return the number of frames in a DICOM image file."""
-
-        frames = 1
-        if 'NumberOfFrames' in self.ds:
-            frames = self.ds.NumberOfFrames.real
-        else:
-            try:
-                self.ds.pixel_array
-            except:
-                return 0
-            else:
-                if (self.ds.pixel_array.ndim > 2):
-                    if (self.ds.SamplesPerPixel == 1) and not \
-                       (self.ds.PhotometricInterpretation == 'RGB'):
-                        frames = self.ds.pixel_array.shape[0]
-        return frames
-
+    def dose_name(self):
+        return self.ds.SeriesDescription
 
     def grid_vectors(self):
         """Return coordinate vectors.
@@ -321,32 +303,21 @@ class DicomImage(DicomBase):
 
         return x, y, z
 
-
-class RTDose(DicomImage):
-    """docstring for RTDose"""
-
-    def __init__(self, ds):
-        super(RTDose, self).__init__(ds)
-
-
-    def dose_name(self):
-        return self.ds.SeriesDescription
-
-
     def grid_spacing(self):
         """Return the smallest spacing present in the grid.
 
         Note that non-regular grids have variable spacing.
+
+        Returns:
+            dx, dy, dz: numpy.ndarray
         """
         dx, dy = self.ds.PixelSpacing
         dz = np.min(np.diff(self.ds.GridFrameOffsetVector))
         return dx, dy, dz
 
-
     def is_regular_grid(self):
         """Return whether grid has regular spacing."""
         return not any(np.diff(np.diff(self.ds.GridFrameOffsetVector)))
-
 
     def dose_array(self):
         scale = self.ds.DoseGridScaling
@@ -371,10 +342,8 @@ class RTStruct(DicomBase):
             else:
                 self._roi_lookup[s.ROIName] = s.ROINumber
 
-
     def structure_names(self):
         return self._roi_lookup.keys()
-
 
     def is_empty_structure(self, name):
         """Return whether a given structure is empty."""
@@ -384,7 +353,6 @@ class RTStruct(DicomBase):
                 return 'ContourSequence' not in roi
 
         return True
-
 
     def structure_mask(self, name, grid):
         """Compute a mask indicating the presence of a 3D structure
@@ -475,3 +443,43 @@ class CT(DicomBase):
     """docstring for CT"""
     def __init__(self, ds):
         super(CT, self).__init__(ds)
+
+    def grid_vectors(self):
+        """Return coordinate vectors.
+
+        Returns:
+            x, y, z: numpy.ndarray
+        """
+        di = self.ds.PixelSpacing[0]
+        dj = self.ds.PixelSpacing[1]
+        cosi = self.ds.ImageOrientationPatient[:3]
+        cosj = self.ds.ImageOrientationPatient[3:]
+        position = self.ds.ImagePositionPatient
+
+        x = position[0] + cosi[0] * di * np.arange(0, self.ds.Columns)
+        y = position[1] + cosj[1] * dj * np.arange(0, self.ds.Rows)
+
+        if 'SliceLocation' in self.ds:
+            z = self.ds.SliceLocation
+        else:
+            z = position[2]
+
+        return x, y, z
+
+    def grid_spacing(self):
+        """Return the grid spacing (CT images have a single slice).
+
+        Returns:
+            dx, dy, dz: numpy.ndarray
+        """
+        dx, dy = self.ds.PixelSpacing
+        dz = self.ds.SliceThickness
+        return dx, dy, dz
+
+    def HU_array(self):
+        if 'RescaleSlope' in self.ds and 'RescaleIntercept' in self.ds:
+            HU = self.ds.pixel_array * self.ds.RescaleSlope \
+                + self.ds.RescaleIntercept
+        else:
+            HU = self.ds.pixel_array
+        return HU
