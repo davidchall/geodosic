@@ -164,12 +164,12 @@ def plot_overlay(scan_array, scan_grid, overlay_array, overlay_grid, i, view,
     if overlay_invisible_zero:
         overlay_cm.set_under('k', alpha=0)
         overlay = overlay.copy()
-        overlay[overlay==0] = -1
+        overlay[overlay == 0] = -1
 
     fig = plt.imshow(overlay, extent=extent,
-                    cmap=overlay_cm, vmax=overlay_max, alpha=overlay_alpha)
+                     cmap=overlay_cm, vmax=overlay_max, alpha=overlay_alpha)
     if overlay_invisible_zero:
-        clim = im.get_clim()
+        clim = fig.get_clim()
         fig.set_clim((0, clim[1]))
     if overlay_cbar:
         plt.colorbar()
