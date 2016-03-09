@@ -15,8 +15,8 @@ def bwperim(image):
     Returns:
         mask: ndarray of bool
     """
-    from mahotas.labeled import borders
-    return borders(image)
+    from mahotas.labeled import bwperim
+    return bwperim(image)
 
 
 def distance_to_surface(mask, grid_spacing=(1, 1, 1)):

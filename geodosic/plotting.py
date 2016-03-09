@@ -6,6 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
+# project imports
+from .geometry import bwperim
+
 
 window_aliases = {
     'default':     ( 400,   40),
@@ -109,11 +112,40 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
     return array_2d, extent
 
 
-def plot_overlay(scan_array, scan_grid, overlay_array, overlay_grid, i, view,
-                 window='default', scan_cbar=False,
-                 overlay_max='global', overlay_cbar=True,
-                 alpha=0.5, invisible_zero=False):
+def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
+                 window='default', cbar_scan=False,
+                 max_overlay='global', cbar_overlay=True,
+                 alpha=0.5, invisible_zero=False,
+                 structures=[]):
 
+    # be explicit
+    array_scan = scan
+    array_overlay = overlay
+
+    if view in sagittal_aliases:
+        dim = 0
+    elif view in coronal_aliases:
+        dim = 1
+    elif view in transverse_aliases:
+        dim = 2
+    else:
+        logging.error('Unrecognized view "%s"' % view)
+        return
+
+    # convert between coordinate vectors (c = generic coordinate)
+    i_scan = -1 if i_scan >= array_scan.shape[dim] else i_scan
+    c_scan, c_overlay = grid_scan[dim], grid_overlay[dim]
+    c_slice = c_scan[i_scan]
+    i_overlay = np.argmin(np.fabs(c_overlay - c_slice))
+
+    # don't plot overlay if out-of-bounds
+    plot_overlay = True
+    if c_slice > np.amax(c_overlay) or c_slice < np.amin(c_overlay):
+        plot_overlay = False
+
+    ###########################
+    #        plot scan        #
+    ###########################
     # window is user-defined or an alias
     try:
         from numbers import Number
@@ -128,65 +160,82 @@ def plot_overlay(scan_array, scan_grid, overlay_array, overlay_grid, i, view,
     else:
         window_width, window_center = window
 
-    ###########################
-    #        plot scan        #
-    ###########################
-    scan_min = window_center - window_width/2.0
-    scan_max = window_center + window_width/2.0
-    scan_slice, extent = slice_array(scan_array, scan_grid, i, view,
-                                     origin='upper')
-    plt.imshow(scan_slice, extent=extent, origin='upper',
-               cmap=cm.bone, vmin=scan_min, vmax=scan_max)
-    if scan_cbar:
+    min_scan = window_center - window_width/2.0
+    max_scan = window_center + window_width/2.0
+    slice_scan, extent = slice_array(array_scan, grid_scan, i_scan, view)
+    fig = plt.imshow(slice_scan, extent=extent,
+                     cmap=cm.bone, vmin=min_scan, vmax=max_scan)
+    if cbar_scan:
         plt.colorbar()
 
     plt.hold(True)
 
-    # convert between coordinate vectors
-    if view in sagittal_aliases:
-        i = -1 if i >= scan_array.shape[0] else i
-        c_scan, c_overlay = scan_grid[0], overlay_grid[0]
-    elif view in coronal_aliases:
-        i = -1 if i >= scan_array.shape[1] else i
-        c_scan, c_overlay = scan_grid[1], overlay_grid[1]
-    elif view in transverse_aliases:
-        i = -1 if i >= scan_array.shape[2] else i
-        c_scan, c_overlay = scan_grid[2], overlay_grid[2]
-
-    c_slice = c_scan[i]
-    # don't plot overlay if out-of-bounds
-    if c_slice > np.amax(c_overlay) or c_slice < np.amin(c_overlay):
-        return
-    i = np.argmin(np.fabs(c_overlay - c_slice))
-
     ##########################
     #      plot overlay      #
     ##########################
-    overlay_slice, extent = slice_array(overlay_array, overlay_grid, i, view,
-                                        origin='upper')
-    if overlay_max == 'global':
-        overlay_max = np.amax(overlay_array)
-    elif overlay_max == 'local':
-        overlay_max = np.amax(overlay_slice)
-    else:
-        try:
-            overlay_max = float(overlay_max)
-        except:
-            overlay_max = np.amax(overlay_array)
+    if plot_overlay:
+        slice_overlay, extent = slice_array(array_overlay, grid_overlay,
+                                            i_overlay, view)
+        if max_overlay == 'global':
+            max_overlay = np.amax(array_overlay)
+        elif max_overlay == 'local':
+            max_overlay = np.amax(slice_overlay)
+        else:
+            try:
+                max_overlay = float(max_overlay)
+            except:
+                max_overlay = np.amax(array_overlay)
 
-    overlay_cm = cm.jet
-    if invisible_zero:
-        overlay_cm.set_under('k', alpha=0)
-        overlay_slice = overlay_slice.copy()
-        overlay_slice[overlay_slice == 0] = -1
+        cm_overlay = cm.jet
+        if invisible_zero:
+            cm_overlay.set_under('k', alpha=0)
+            slice_overlay = slice_overlay.copy()
+            slice_overlay[slice_overlay == 0] = -1
 
-    fig = plt.imshow(overlay_slice, extent=extent, origin='upper',
-                     cmap=overlay_cm, vmax=overlay_max, alpha=alpha)
-    if invisible_zero:
-        clim = fig.get_clim()
-        fig.set_clim((0, clim[1]))
-    if overlay_cbar:
-        plt.colorbar()
+        fig = plt.imshow(slice_overlay, extent=extent,
+                         cmap=cm_overlay, vmax=max_overlay, alpha=alpha)
+        if invisible_zero:
+            clim = fig.get_clim()
+            fig.set_clim((0, clim[1]))
+        if cbar_overlay:
+            plt.colorbar()
 
+    #######################################
+    #      plot structure perimeters      #
+    #######################################
+    if len(structures) > 0:
+        slice_perim_scan = np.zeros_like(slice_scan, dtype=bool)
+        slice_perim_overlay = np.zeros_like(slice_overlay, dtype=bool)
+
+        for mask in structures:
+            slice_mask_shape = mask.shape[:dim] + mask.shape[dim+1:]
+
+            if set(slice_mask_shape) == set(slice_scan.shape):
+                slice_mask, extent_scan = slice_array(mask, grid_scan,
+                                                      i_scan, view)
+                slice_perim_scan += bwperim(slice_mask)
+
+            elif set(slice_mask_shape) == set(slice_overlay.shape):
+                slice_mask, extent_overlay = slice_array(mask, grid_overlay,
+                                                         i_overlay, view)
+                slice_perim_overlay += bwperim(slice_mask)
+
+            else:
+                logging.error('Structure found on unrecognized grid')
+                continue
+
+        # use a masked array, since masked values are set as "bad"
+        # and matplotlib makes these pixels transparent
+        if np.any(slice_perim_scan):
+            slice_perim_scan = np.ma.masked_equal(slice_perim_scan, False)
+            fig = plt.imshow(slice_perim_scan, extent=extent_scan,
+                             cmap='binary')
+
+        if np.any(slice_perim_overlay):
+            slice_perim_overlay = np.ma.masked_equal(slice_perim_overlay, False)
+            fig = plt.imshow(slice_perim_overlay, extent=extent_overlay,
+                             cmap='binary')
+
+    # tidy up
     fig.axes.get_xaxis().set_ticks([])
     fig.axes.get_yaxis().set_ticks([])
