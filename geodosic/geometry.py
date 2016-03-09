@@ -1,8 +1,22 @@
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import distance_transform_edt
-from mahotas.labeled import borders
 from six.moves import reduce
+
+
+def bwperim(image):
+    """Find the perimeter of objects in a binary image.
+
+    This is used to find the surface of structure masks.
+
+    Parameters:
+        image: ndarray
+
+    Returns:
+        mask: ndarray of bool
+    """
+    from mahotas.labeled import borders
+    return borders(image)
 
 
 def distance_to_surface(mask, grid_spacing=(1, 1, 1)):
@@ -19,10 +33,9 @@ def distance_to_surface(mask, grid_spacing=(1, 1, 1)):
         distance: 3-d numpy.ndarray of floats with shape (m1, m2, m3)
     """
     # find surface of structure
-    perim = borders(mask)
+    perim = bwperim(mask)
 
-    # euclidean distance transform
-    # NOTE: distance calculated from False voxels
+    # euclidean distance transform (calculated from False voxels)
     distance = distance_transform_edt(~perim, sampling=grid_spacing)
 
     # set negative within structure
