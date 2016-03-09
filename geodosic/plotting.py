@@ -110,29 +110,32 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
 
 
 def plot_overlay(scan_array, scan_grid, overlay_array, overlay_grid, i, view,
-                 scan_window='default', scan_cbar=False,
-                 overlay_alpha=0.5, overlay_cbar=True,
-                 overlay_invisible_zero=False):
+                 window='default', scan_cbar=False,
+                 overlay_max='global', overlay_cbar=True,
+                 alpha=0.5, invisible_zero=False):
 
     # window is user-defined or an alias
     try:
         from numbers import Number
-        assert len(scan_window) == 2
-        assert isinstance(scan_window[0], Number)
-        assert isinstance(scan_window[1], Number)
+        assert len(window) == 2
+        assert isinstance(window[0], Number)
+        assert isinstance(window[1], Number)
     except:
-        if scan_window not in window_aliases:
-            logging.warning('Unrecognized window alias "%s"' % scan_window)
-            scan_window = 'default'
-        window_width, window_center = window_aliases[scan_window]
+        if window not in window_aliases:
+            logging.warning('Unrecognized window alias "%s"' % window)
+            window = 'default'
+        window_width, window_center = window_aliases[window]
     else:
-        window_width, window_center = scan_window
+        window_width, window_center = window
 
-    # plot scan
+    ###########################
+    #        plot scan        #
+    ###########################
     scan_min = window_center - window_width/2.0
     scan_max = window_center + window_width/2.0
-    scan, extent = slice_array(scan_array, scan_grid, i, view)
-    plt.imshow(scan, extent=extent,
+    scan_slice, extent = slice_array(scan_array, scan_grid, i, view,
+                                     origin='upper')
+    plt.imshow(scan_slice, extent=extent, origin='upper',
                cmap=cm.bone, vmin=scan_min, vmax=scan_max)
     if scan_cbar:
         plt.colorbar()
@@ -156,19 +159,30 @@ def plot_overlay(scan_array, scan_grid, overlay_array, overlay_grid, i, view,
         return
     i = np.argmin(np.fabs(c_overlay - c_slice))
 
-    # plot overlay
-    overlay_max = np.amax(overlay_array)
-    overlay, extent = slice_array(overlay_array, overlay_grid, i, view)
+    ##########################
+    #      plot overlay      #
+    ##########################
+    overlay_slice, extent = slice_array(overlay_array, overlay_grid, i, view,
+                                        origin='upper')
+    if overlay_max == 'global':
+        overlay_max = np.amax(overlay_array)
+    elif overlay_max == 'local':
+        overlay_max = np.amax(overlay_slice)
+    else:
+        try:
+            overlay_max = float(overlay_max)
+        except:
+            overlay_max = np.amax(overlay_array)
 
     overlay_cm = cm.jet
-    if overlay_invisible_zero:
+    if invisible_zero:
         overlay_cm.set_under('k', alpha=0)
-        overlay = overlay.copy()
-        overlay[overlay == 0] = -1
+        overlay_slice = overlay_slice.copy()
+        overlay_slice[overlay_slice == 0] = -1
 
-    fig = plt.imshow(overlay, extent=extent,
-                     cmap=overlay_cm, vmax=overlay_max, alpha=overlay_alpha)
-    if overlay_invisible_zero:
+    fig = plt.imshow(overlay_slice, extent=extent, origin='upper',
+                     cmap=overlay_cm, vmax=overlay_max, alpha=alpha)
+    if invisible_zero:
         clim = fig.get_clim()
         fig.set_clim((0, clim[1]))
     if overlay_cbar:
