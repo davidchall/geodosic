@@ -13,6 +13,7 @@ from scipy.optimize import curve_fit
 
 # project imports
 from .geometry import distance_to_surface
+from .dvh import DVH
 
 
 class skew_normal_gen(ss.rv_continuous):
@@ -224,16 +225,13 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return i_shell, dist_edges
 
     def predict(self, X):
-        dvhs = [self._predict_patient(p) for p in X]
-        return dvhs
+        return [self.predict_patient(p) for p in X]
 
-    def _predict_patient(self, p):
-        if self.dose_name not in p.dose_names():
-            return
-
+    def predict_patient(self, p):
         if self.oar_name not in p.structure_names():
             return
 
+        # TODO: should not rely on dose array
         grid = p.dose_grid_vectors(self.dose_name)
         grid_spacing = p.dose_grid_spacing(self.dose_name)
 
@@ -257,4 +255,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             dose_shell = skew_normal_pdf(dose_centers, *popt)
             dose_counts += n_voxels_shell * dose_shell
 
-        return dose_centers, dose_counts
+        # parametric fits yield long tails, but DVH requires last bin is zero
+        dose_counts[-1] = 0
+        return DVH(dose_counts, dose_edges, dDVH=True)
