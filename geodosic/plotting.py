@@ -114,10 +114,29 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
 
 def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
                  window='default', cbar_scan=False,
-                 max_overlay='global', cbar_overlay=True,
+                 lim_overlay='global', cbar_overlay=True,
                  alpha=0.5, invisible_zero=False,
                  structures=[]):
+    """Plot a grayscale scan with a color overlay and outlined structures.
 
+    Parameters:
+        scan:           3D scan array
+        grid_scan:      (x,y,z) coordinate vectors of scan
+        overlay:        3D overlay array
+        grid_overlay:   (x,y,z) coordinate vectors of overlay
+        i_scan:         sliced frame
+        view:           which plane to slice {'sag', 'cor', 'tra'}
+
+    Optional parameters:
+        window:         an alias (e.g. 'lung') or a (width, center) tuple
+        cbar_scan:      display a colorbar for the scan
+        lim_overlay:    'global', 'local' or a (min, max) tuple
+        cbar_overlay:   display a colorbar for the overlay
+        alpha:          overlay alpha blending
+        invisible_zero: makes voxels containing zero transparent
+        structures:     list of structure masks (should either be defined on
+                        grid_scan or grid_overlay)
+    """
     # be explicit
     array_scan = scan
     array_overlay = overlay
@@ -176,24 +195,33 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
     if plot_overlay:
         slice_overlay, extent = slice_array(array_overlay, grid_overlay,
                                             i_overlay, view)
-        if max_overlay == 'global':
+        if lim_overlay == 'global':
+            min_overlay = np.amin(array_overlay)
             max_overlay = np.amax(array_overlay)
-        elif max_overlay == 'local':
+        elif lim_overlay == 'local':
+            min_overlay = np.amin(slice_overlay)
             max_overlay = np.amax(slice_overlay)
         else:
             try:
+                min_overlay, max_overlay = lim_overlay
+                min_overlay = float(min_overlay)
                 max_overlay = float(max_overlay)
             except:
+                logging.warning('Unrecognized lim_overlay')
+                min_overlay = np.amin(array_overlay)
                 max_overlay = np.amax(array_overlay)
 
         cm_overlay = cm.jet
         if invisible_zero:
+            if np.amin(slice_overlay) < 0:
+                logging.warning('The invisible_zero option should not be used '
+                    'when the overlay contains negative values.')
             cm_overlay.set_under('k', alpha=0)
             slice_overlay = slice_overlay.copy()
             slice_overlay[slice_overlay == 0] = -1
 
-        fig = plt.imshow(slice_overlay, extent=extent,
-                         cmap=cm_overlay, vmax=max_overlay, alpha=alpha)
+        fig = plt.imshow(slice_overlay, extent=extent, alpha=alpha,
+                         cmap=cm_overlay, vmin=min_overlay, vmax=max_overlay)
         if invisible_zero:
             clim = fig.get_clim()
             fig.set_clim((0, clim[1]))

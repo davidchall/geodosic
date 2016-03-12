@@ -1,3 +1,4 @@
+# third-party imports
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import distance_transform_edt
