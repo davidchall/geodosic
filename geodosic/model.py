@@ -60,11 +60,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
     @initializer
     def __init__(self, dose_name=None, oar_name=None, target_name=None,
-                 shell_width=3.0, method='rv_continuous',
-                 plot_shell_fits=None):
+                 shell_width=3.0, method='rv_continuous'):
         pass
 
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, plot_file=None):
         """Train the model.
 
         Parameters:
@@ -77,14 +76,16 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         assert self.target_name is not None
         assert self.shell_width > 0
 
-        if self.plot_shell_fits:
-            self.pp = PdfPages(self.plot_shell_fits)
+        self.pp = PdfPages(plot_file) if plot_file else None
+        if self.pp:
+            self.iPatient = 0
 
         # fit dose shells for all patients
         popt_all = [self._fit_patient(p) for p in X]
 
-        if self.plot_shell_fits:
+        if self.pp:
             self.pp.close()
+            del self.pp, self.iPatient, self.iShell
 
         # what range of shell distances were covered?
         min_i = min(min(popt.keys()) for popt in popt_all)
@@ -122,6 +123,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         if self.oar_name not in p.structure_names():
             return
 
+        if self.pp:
+            self.iPatient += 1
+
         dose = p.dose_array(self.dose_name)
         dose_grid = p.dose_grid_vectors(self.dose_name)
         dose_spacing = p.dose_grid_spacing(self.dose_name)
@@ -144,6 +148,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             if dose_shell.size < 4:
                 continue
+
+            if self.pp:
+                self.iShell = i
 
             try:
                 popt[i] = self._fit_shell(dose_shell)
@@ -185,12 +192,13 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(p_lower, p_upper))
 
-        if self.plot_shell_fits:
+        if self.pp:
             plt.plot(bin_centers, counts, drawstyle='steps-mid', label='Data')
             x = np.linspace(np.amin(bin_centers), np.amax(bin_centers), 100)
             plt.plot(x, skew_normal_pdf(x, *popt), label='Fit')
             plt.xlabel('Dose / Target Dose')
             plt.legend(loc='best')
+            plt.title('Patient %i: Shell %i' % (self.iPatient, self.iShell))
             self.pp.savefig()
             plt.clf()
 
