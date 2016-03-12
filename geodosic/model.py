@@ -247,11 +247,19 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
         dose_counts = np.zeros_like(dose_centers)
 
+        min_fitted_i = min(self.popt_avg_.keys())
+        max_fitted_i = max(self.popt_avg_.keys())
+
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
-            n_voxels_shell = np.sum(oar_mask[(dist > inner) & (dist < outer)])
+            if i < min_fitted_i:
+                popt = self.popt_avg_[min_fitted_i]
+            elif i > max_fitted_i:
+                popt = self.popt_avg_[max_fitted_i]
+            else:
+                popt = self.popt_avg_[i]
 
-            popt = self.popt_avg_[i]
+            n_voxels_shell = np.sum(oar_mask[(dist > inner) & (dist < outer)])
             dose_shell = skew_normal_pdf(dose_centers, *popt)
             dose_counts += n_voxels_shell * dose_shell
 
