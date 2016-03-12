@@ -47,7 +47,7 @@ class DVH(object):
     def cDVH(self, volumes):
         volumes = volumes / np.amax(volumes)
         self._cDVH = volumes
-        self._dDVH = np.diff(volumes[::-1])[::-1]
+        self._dDVH = np.append(np.diff(volumes[::-1])[::-1], volumes[-1])
 
     @property
     def dDVH(self):
@@ -55,9 +55,8 @@ class DVH(object):
 
     @dDVH.setter
     def dDVH(self, volumes):
-        volumes = volumes / np.sum(volumes)
-        self._dDVH = volumes
-        self._cDVH = np.cumsum(volumes[::-1])[::-1]
+        # cDVH normalization more robust to floating point precision
+        self.cDVH = np.cumsum(volumes[::-1])[::-1]
 
     @property
     def dose_centers(self):
