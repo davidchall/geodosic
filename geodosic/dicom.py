@@ -57,7 +57,6 @@ class DicomCollection(object):
         dicom_files = list(set(dicom_files))
 
         # read DICOM files
-        # TODO: support RTPLAN and CT
         self.rtdose, self.rtss, self.rtplan, self.ct = [], [], [], []
         for fname in dicom_files:
             ds = pydicom_read_file(fname, defer_size=100, force=True)

@@ -10,6 +10,7 @@ import scipy.stats as ss
 from astropy.stats import histogram
 from sklearn.base import BaseEstimator, RegressorMixin
 from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
 
 # project imports
 from .geometry import distance_to_surface
@@ -266,3 +267,34 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         # parametric fits yield long tails, but DVH requires last bin is zero
         dose_counts[-1] = 0
         return DVH(dose_counts, dose_edges, dDVH=True)
+
+    def score(self, X, y=None):
+        preds = self.predict(X)
+        plans = []
+
+        dose_edges = preds[0].dose_edges
+        for p in X:
+            dose = p.dose_array(self.dose_name)
+            dose_grid = p.dose_grid_vectors(self.dose_name)
+            target_mask = p.structure_mask(self.target_name, dose_grid)
+            oar_mask = p.structure_mask(self.oar_name, dose_grid)
+
+            target_dose = np.mean(dose[target_mask])
+            dose = dose.copy() / target_dose
+
+            plans.append(DVH.from_raw(dose[oar_mask], dose_edges))
+
+        y_true = [dvh.mean() for dvh in plans]
+        y_pred = [dvh.mean() for dvh in preds]
+        r2 = r2_score(y_true, y_pred)
+
+        plt.scatter(y_true, y_pred)
+        max_val = 1.1*max(*y_true, *y_pred)
+        plt.plot([0, max_val], [0, max_val], ':')
+        plt.xlabel('Planned metric')
+        plt.ylabel('Predicted metric')
+        plt.text(0.05, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
+        plt.axis('square')
+        plt.axis([0, max_val, 0, max_val])
+
+        return r2
