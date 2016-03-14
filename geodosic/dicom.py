@@ -15,7 +15,8 @@ except ImportError:
     from dicom import read_file as pydicom_read_file
 
 # project imports
-from .geometry import cartesian_product
+from .geometry import cartesian_product, distance_to_surface
+from .utils import lazy_property
 
 
 CT_UID = '1.2.840.10008.5.1.4.1.1.2'
@@ -83,20 +84,58 @@ class DicomCollection(object):
         if not skip_check:
             pass
 
+    @lazy_property
     def structure_names(self):
-        """Returns list of available structures."""
+        """Set of available structures."""
         return set(x for ss in self.rtss for x in ss.structure_names())
 
-    def structure_mask(self, name, grid):
-        index = self._find_structure(name)
+    @lazy_property
+    def dose_names(self):
+        """Set of available doses."""
+        return set(dose.dose_name() for dose in self.rtdose)
+
+    @lazy_property
+    def default_grid_name(self):
+        if len(self.rtdose) > 0:
+            return self.rtdose[0].dose_name()
+        elif len(self.ct) > 0:
+            return 'ct'
+        else:
+            return 'custom'
+
+    def structure_mask(self, struct_name, grid_name):
+        index = self._find_structure(struct_name)
+        grid = self.grid_vectors(grid_name)
         if index is None:
             return None
         else:
-            return self.rtss[index].structure_mask(name, grid)
+            return self.rtss[index].structure_mask(struct_name, grid)
 
-    def dose_names(self):
-        """Returns list of available doses."""
-        return set(dose.dose_name() for dose in self.rtdose)
+    def distance_to_surface(self, struct_name, grid_name):
+        mask = self.structure_mask(struct_name, grid_name)
+        grid_spacing = self.grid_spacing(grid_name)
+
+        return distance_to_surface(mask, grid_spacing)
+
+    def grid_vectors(self, grid_name):
+        if grid_name.lower() == 'default':
+            grid_name = self.default_grid_name
+        if grid_name.lower() == 'ct':
+            return self.ct_grid_vectors()
+        if grid_name.lower() == 'custom':
+            return self.custom_grid_vectors()
+        else:
+            return self.dose_grid_vectors(grid_name)
+
+    def grid_spacing(self, grid_name):
+        if grid_name.lower() == 'default':
+            grid_name = self.default_grid_name
+        if grid_name.lower() == 'ct':
+            return self.ct_grid_spacing()
+        if grid_name.lower() == 'custom':
+            return self.custom_grid_spacing()
+        else:
+            return self.dose_grid_spacing(grid_name)
 
     def dose_grid_vectors(self, name):
         index = self._find_dose(name)
@@ -143,6 +182,12 @@ class DicomCollection(object):
 
     def ct_array(self):
         return np.dstack(ct.HU_array() for ct in self.ct)
+
+    def custom_grid_vectors(self):
+        raise NotImplementedError
+
+    def custom_grid_spacing(self):
+        raise NotImplementedError
 
     def _find_structure(self, name):
         """Returns index for RTSS file containing the desired structure.
@@ -283,6 +328,12 @@ class RTDose(DicomBase):
 
     def dose_name(self):
         return self.ds.SeriesDescription
+
+    @property
+    def shape(self):
+        nx, ny = self.ds.Columns, self.ds.Rows
+        nz = len(self.ds.GridFrameOffsetVector)
+        return nx, ny, nz
 
     def grid_vectors(self):
         """Return coordinate vectors.

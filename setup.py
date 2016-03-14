@@ -10,6 +10,7 @@ requirements = [
     'scipy',
     'matplotlib',
     'mahotas',
+    'msgpack-numpy>=0.3.7',
 ]
 
 setup(

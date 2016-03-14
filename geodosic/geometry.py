@@ -45,6 +45,26 @@ def distance_to_surface(mask, grid_spacing=(1, 1, 1)):
     return distance
 
 
+def bin_distance(min_dist, max_dist, width):
+
+    dist_edges = np.arange(0., max_dist, width)
+    dist_edges = np.append(dist_edges, np.inf)
+    i_shell = np.arange(1, dist_edges.size)
+
+    if min_dist < -width:
+        neg_dist_edges = np.arange(width, -min_dist, width)
+        neg_dist_edges = np.append(neg_dist_edges, np.inf)
+        dist_edges = np.insert(dist_edges, 0, -neg_dist_edges[::-1])
+
+        neg_i_shell = np.arange(1, neg_dist_edges.size+1)
+        i_shell = np.insert(i_shell, 0, -neg_i_shell[::-1])
+    else:
+        dist_edges = np.insert(dist_edges, 0, -np.inf)
+        i_shell = np.insert(i_shell, 0, -1)
+
+    return i_shell, dist_edges
+
+
 def interpolate_grids(values, old_grid, new_grid):
     """Interpolate data from one regular grid to another.
 

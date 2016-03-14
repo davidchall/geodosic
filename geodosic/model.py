@@ -13,7 +13,7 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
 # project imports
-from .geometry import distance_to_surface
+from .geometry import distance_to_surface, bin_distance
 from .dvh import DVH
 
 
@@ -62,7 +62,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
     @initializer
     def __init__(self, dose_name=None, oar_name=None, target_name=None,
-                 shell_width=3.0, method='rv_continuous'):
+                 shell_width=3.0, method='curve_fit'):
         pass
 
     def fit(self, X, y=None, plot_file=None):
@@ -119,34 +119,34 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt: dict of (i: popt_i) pairs, where popt_i is a tuple containing
                 the best-fit parameters for shell i
         """
-        if self.dose_name not in p.dose_names():
+        if self.dose_name not in p.dose_names:
             return
 
-        if self.oar_name not in p.structure_names():
+        if self.oar_name not in p.structure_names:
             return
 
         if self.pp:
             self.iPatient += 1
 
+        target_mask = p.structure_mask(self.target_name, self.dose_name)
+        oar_mask = p.structure_mask(self.oar_name, self.dose_name)
+        dist = p.distance_to_surface(self.target_name, self.dose_name)
+
         dose = p.dose_array(self.dose_name)
-        dose_grid = p.dose_grid_vectors(self.dose_name)
-        dose_spacing = p.dose_grid_spacing(self.dose_name)
-
-        target_mask = p.structure_mask(self.target_name, dose_grid)
-        oar_mask = p.structure_mask(self.oar_name, dose_grid)
-
         target_dose = np.mean(dose[target_mask])
-        dose = dose.copy() / target_dose
+        dose /= target_dose
 
-        dist = distance_to_surface(target_mask, dose_spacing)
         min_dist = np.amin(dist[oar_mask])
         max_dist = np.amax(dist[oar_mask])
-        i_shell, dist_edges = self._bin_distance(min_dist, max_dist, self.shell_width)
+        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
+
+        dose_oar = dose[oar_mask]
+        dist_oar = dist[oar_mask]
 
         popt = {}
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
-            dose_shell = dose[oar_mask & (dist > inner) & (dist < outer)]
+            dose_shell = dose_oar[(dist_oar > inner) & (dist_oar < outer)]
 
             if dose_shell.size < 4:
                 continue
@@ -180,12 +180,14 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
         # using scipy.stats.rv_continuous.fit (fit raw data)
+        # takes about 5 seconds per patient
         if self.method == 'rv_continuous':
             popt = skew_normal.fit(dose, ss.skew(dose),
                                    loc=np.mean(dose), scale=np.std(dose))
             popt = popt[-2:] + popt[:-2]
 
         # using scipy.optimize.curve_fit (fit a histogram)
+        # takes about 1.7 seconds per patient
         if self.method == 'curve_fit':
             p0 = (np.mean(dose), np.std(dose), ss.skew(dose))
             p_upper = (2, 1, 1000)
@@ -194,6 +196,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(p_lower, p_upper))
 
+        # takes about 5 seconds per patient
         if self.pp:
             plt.plot(bin_centers, counts, drawstyle='steps-mid', label='Data')
             x = np.linspace(np.amin(bin_centers), np.amax(bin_centers), 100)
@@ -206,43 +209,21 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         return popt
 
-    def _bin_distance(self, min_dist, max_dist, width):
-
-        dist_edges = np.arange(0., max_dist, width)
-        dist_edges = np.append(dist_edges, np.inf)
-        i_shell = np.arange(1, dist_edges.size)
-
-        if min_dist < -width:
-            neg_dist_edges = np.arange(width, -min_dist, width)
-            neg_dist_edges = np.append(neg_dist_edges, np.inf)
-            dist_edges = np.insert(dist_edges, 0, -neg_dist_edges[::-1])
-
-            neg_i_shell = np.arange(1, neg_dist_edges.size+1)
-            i_shell = np.insert(i_shell, 0, -neg_i_shell[::-1])
-        else:
-            dist_edges = np.insert(dist_edges, 0, -np.inf)
-            i_shell = np.insert(i_shell, 0, -1)
-
-        return i_shell, dist_edges
-
     def predict(self, X):
         return [self.predict_patient(p) for p in X]
 
     def predict_patient(self, p):
-        if self.oar_name not in p.structure_names():
+        if self.oar_name not in p.structure_names:
+            return
+        if self.target_name not in p.structure_names:
             return
 
-        # TODO: should not rely on dose array
-        grid = p.dose_grid_vectors(self.dose_name)
-        grid_spacing = p.dose_grid_spacing(self.dose_name)
+        oar_mask = p.structure_mask(self.oar_name, 'default')
+        dist = p.distance_to_surface(self.target_name, 'default')
 
-        target_mask = p.structure_mask(self.target_name, grid)
-        oar_mask = p.structure_mask(self.oar_name, grid)
-
-        dist = distance_to_surface(target_mask, grid_spacing)
         min_dist = np.amin(dist[oar_mask])
         max_dist = np.amax(dist[oar_mask])
-        i_shell, dist_edges = self._bin_distance(min_dist, max_dist, self.shell_width)
+        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
         dose_edges = np.linspace(0., 1.2, 120)
         dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
@@ -250,6 +231,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         min_fitted_i = min(self.popt_avg_.keys())
         max_fitted_i = max(self.popt_avg_.keys())
+
+        dist_oar = dist[oar_mask]
 
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
@@ -260,7 +243,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             else:
                 popt = self.popt_avg_[i]
 
-            n_voxels_shell = np.sum(oar_mask[(dist > inner) & (dist < outer)])
+            shell = (dist_oar > inner) & (dist_oar < outer)
+            n_voxels_shell = np.count_nonzero(shell)
             dose_shell = skew_normal_pdf(dose_centers, *popt)
             dose_counts += n_voxels_shell * dose_shell
 
@@ -275,12 +259,11 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_edges = preds[0].dose_edges
         for p in X:
             dose = p.dose_array(self.dose_name)
-            dose_grid = p.dose_grid_vectors(self.dose_name)
-            target_mask = p.structure_mask(self.target_name, dose_grid)
-            oar_mask = p.structure_mask(self.oar_name, dose_grid)
+            target_mask = p.structure_mask(self.target_name, self.dose_name)
+            oar_mask = p.structure_mask(self.oar_name, self.dose_name)
 
             target_dose = np.mean(dose[target_mask])
-            dose = dose.copy() / target_dose
+            dose /= target_dose
 
             plans.append(DVH.from_raw(dose[oar_mask], dose_edges))
 
