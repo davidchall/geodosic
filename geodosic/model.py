@@ -136,12 +136,11 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         target_dose = np.mean(dose[target_mask])
         dose /= target_dose
 
-        min_dist = np.amin(dist[oar_mask])
-        max_dist = np.amax(dist[oar_mask])
-        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
-
         dose_oar = dose[oar_mask]
         dist_oar = dist[oar_mask]
+        min_dist = np.amin(dist_oar)
+        max_dist = np.amax(dist_oar)
+        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
         popt = {}
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
@@ -220,9 +219,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         oar_mask = p.structure_mask(self.oar_name, 'default')
         dist = p.distance_to_surface(self.target_name, 'default')
+        dist_oar = dist[oar_mask]
 
-        min_dist = np.amin(dist[oar_mask])
-        max_dist = np.amax(dist[oar_mask])
+        min_dist = np.amin(dist_oar)
+        max_dist = np.amax(dist_oar)
         i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
         dose_edges = np.linspace(0., 1.2, 120)
@@ -231,8 +231,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         min_fitted_i = min(self.popt_avg_.keys())
         max_fitted_i = max(self.popt_avg_.keys())
-
-        dist_oar = dist[oar_mask]
 
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
@@ -252,7 +250,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_counts[-1] = 0
         return DVH(dose_counts, dose_edges, dDVH=True)
 
-    def score(self, X, y=None):
+    def score(self, X, y=None, plot=False):
         preds = self.predict(X)
         plans = []
 
@@ -271,13 +269,14 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         y_pred = [dvh.mean() for dvh in preds]
         r2 = r2_score(y_true, y_pred)
 
-        plt.scatter(y_true, y_pred)
-        max_val = 1.1*max(*y_true, *y_pred)
-        plt.plot([0, max_val], [0, max_val], ':')
-        plt.xlabel('Planned metric')
-        plt.ylabel('Predicted metric')
-        plt.text(0.05, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
-        plt.axis('square')
-        plt.axis([0, max_val, 0, max_val])
+        if plot:
+            plt.scatter(y_true, y_pred)
+            max_val = 1.1*max(*y_true, *y_pred)
+            plt.plot([0, max_val], [0, max_val], ':')
+            plt.xlabel('Planned metric')
+            plt.ylabel('Predicted metric')
+            plt.text(0.05, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
+            plt.axis('square')
+            plt.axis([0, max_val, 0, max_val])
 
         return r2
