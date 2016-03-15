@@ -57,62 +57,82 @@ class DicomRtStruct(DicomBase):
 
         for roi in self.ds.ROIContourSequence:
             if roi.ReferencedROINumber == self._roi_lookup[name]:
-                contours = roi.ContourSequence
+                all_contours = roi.ContourSequence
 
-        # TODO: there may be multiple contours per z coordinate
-        # so contour_points dict won't work in this case
-        # would need to check if contours are inside others
-        contour_points = {}
-        z_contour = []
-        for i, c in enumerate(contours):
-            data = np.array(c.ContourData)
-            z_contour.append(data[2])
-            contour_points[i] = np.delete(data, np.arange(2, data.size, 3))
-            contour_points[i] = np.reshape(contour_points[i], (-1,2))
+        # planes is a dict, where the key is the z-coordinate and the value is
+        # a list of contours in that plane (each contour is a list of points)
+        planes = {}
+        for c in all_contours:
+            contour_points_3d = np.array(c.ContourData).reshape((-1,3))
+            contour_points_2d = contour_points_3d[:,0:2]
+            contour_z = contour_points_3d[0,2]
 
-        def get_polygon_mask(polygon_points, grid_points):
-            """Compute a mask indicating the presence of a 2D polygon
-            upon a 2D grid.
-
-            Parameters:
-                polygon_points: numpy.ndarray with shape (p, 2)
-                grid_points: numpy.ndarray with shape (m, 2)
-
-            Returns:
-                mask: numpy.ndarray of bool with shape (m,)
-            """
-            # find bounding box for polygon
-            bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
-            bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
-
-            bb_mask = (grid_points[:,0] > bb_min_x) & \
-                      (grid_points[:,0] < bb_max_x) & \
-                      (grid_points[:,1] > bb_min_y) & \
-                      (grid_points[:,1] < bb_max_y)
-
-            # check if points in bounding box are within polygon
-            polygon = Path(polygon_points)
-            bb_polygon_mask = polygon.contains_points(grid_points[bb_mask])
-
-            # set the mask values within the bounding box on the grid
-            polygon_mask = np.zeros_like(bb_mask, dtype=bool)
-            polygon_mask[bb_mask] = bb_polygon_mask
-
-            return polygon_mask
+            # round the float to use as a key
+            contour_z = round(contour_z, 4)
+            contours_list = planes.setdefault(contour_z, [])
+            contours_list.append(contour_points_2d)
 
         x, y, z = grid
         points_2d = cartesian_product((x, y))
         mask_3d = np.zeros((x.size, y.size, z.size), dtype=bool)
 
+        # find grid slices nearest to first and last structure planes
+        z_planes = list(planes.keys())
+        min_z = z[np.fabs(z - np.amin(z_planes)).argmin()]
+        max_z = z[np.fabs(z - np.amax(z_planes)).argmin()]
+
+        # loop through z slices of the grid, find the nearest plane of contours
+        # and use the structure mask for that plane
         for i, z_i in enumerate(z):
-            #  TODO: loosen this, to use contour in one slice either side
-            if z_i < np.amin(z_contour) or z_i > np.amax(z_contour):
+            if z_i < min_z or z_i > max_z:
                 continue
 
-            closest_contour = np.argmin(np.fabs(z_contour - z_i))
-            polygon_points = contour_points[closest_contour]
-            polygon_mask = get_polygon_mask(polygon_points, points_2d)
+            i_closest_plane = np.argmin(np.fabs(z_planes - z_i))
+            contours_list = planes[z_planes[i_closest_plane]]
 
-            mask_3d[:,:,i] = polygon_mask.reshape((x.size, y.size))
+            if len(contours_list) == 1:
+                c = contours_list[0]
+                structure_mask_2d = get_polygon_mask(c, points_2d)
+            else:
+                # enclosed by  odd number of contours =>  inside structure
+                # enclosed by even number of contours => outside structure
+                switch = np.ones_like(points_2d[:,0]).astype(np.int8)
+                for c in contours_list:
+                    polygon_mask = get_polygon_mask(c, points_2d)
+                    switch[polygon_mask] *= -1
+                structure_mask_2d = (switch == -1)
+
+            mask_3d[:,:,i] = structure_mask_2d.reshape((x.size, y.size))
 
         return mask_3d
+
+
+def get_polygon_mask(polygon_points, grid_points):
+    """Compute a mask indicating the presence of a 2D polygon
+    upon a 2D grid.
+
+    Parameters:
+        polygon_points: numpy.ndarray with shape (p, 2)
+        grid_points: numpy.ndarray with shape (m, 2)
+
+    Returns:
+        mask: numpy.ndarray of bool with shape (m,)
+    """
+    # find bounding box for polygon
+    bb_min_x, bb_min_y = np.amin(polygon_points, axis=0)
+    bb_max_x, bb_max_y = np.amax(polygon_points, axis=0)
+
+    bb_mask = (grid_points[:,0] > bb_min_x) & \
+              (grid_points[:,0] < bb_max_x) & \
+              (grid_points[:,1] > bb_min_y) & \
+              (grid_points[:,1] < bb_max_y)
+
+    # check if points in bounding box are within polygon
+    polygon = Path(polygon_points)
+    bb_polygon_mask = polygon.contains_points(grid_points[bb_mask])
+
+    # set the mask values within the bounding box on the grid
+    polygon_mask = np.zeros_like(bb_mask, dtype=bool)
+    polygon_mask[bb_mask] = bb_polygon_mask
+
+    return polygon_mask
