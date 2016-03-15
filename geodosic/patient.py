@@ -3,26 +3,30 @@ import os.path
 from functools import wraps
 
 # third-party imports
-import msgpack
-import msgpack_numpy as m
+import numpy as np
 
 # project imports
 from .dicom import DicomCollection
 from .geometry import distance_to_surface
 from .utils import lazy_property
 
-m.patch()
 
-
-def persistent_result(group_key, result_key_args):
+def persistent_result(func_key, i_keys):
     """Indicates that the object returned by the decorated function should be
-    persistently stored in result_file.  If the result already exists in
-    result_file then this version is returned instead, to save unnecessary
-    computation.
+    persistently stored in the patient's result_file.  If the result already
+    exists in result_file then this stored version is returned instead, to
+    save unnecessary computation.
+
+    The decorator arguments determine how to build the key used to store the
+    result. The func_key is used to identify the function used to produce the
+    result (e.g. distance, structure_mask). The result_key_args identify which
+    arguments are appended to the func_key (e.g. struct_name, grid_name). The
+    result_key_args is either an int or a tuple of ints. The arguments it
+    refers to must be strings.
 
         class Patient(object):
 
-            @persistent_result('structure_masks', (0,1))
+            @persistent_result('structure_mask', (1,2))
             def structure_mask(self, struct_name, grid_name):
                 return self.dicom.structure_mask(struct_name, grid_name)
 
@@ -31,31 +35,30 @@ def persistent_result(group_key, result_key_args):
             mask = p.get_structure_mask('bladder', 'ct')
 
         which would produce a result file like:
-            {
-                "structure_masks": {
-                    ("bladder", "ct"): mask_array
-                }
-            }
-
-    Note that the sub-dictionary key is specified in the decorator, and the
-    actual result key is obtained from the method arguments, as specified in
-    the decorator. In this instance "bladder_DCH" is the structure name used
-    in the DICOM file, not the key used in the result file. This is found
-    from the config file.
+        {
+            "structure_mask, bladder, ct": mask_array
+        }
     """
     def persistent_result_decorator(func):
         @wraps(func)
         def func_wrapper(self, *args, **kwargs):
 
-            if hasattr(result_key_args, '__iter__'):
-                result_key = tuple(args[i-1] for i in result_key_args)
+            if hasattr(i_keys, '__iter__'):
+                i_arg_keys = list(i_keys)
             else:
-                result_key = args[result_key_args-1]
+                i_arg_keys = [i_keys]
 
-            group = self._results.setdefault(group_key, {})
-            if result_key not in group:
-                group[result_key] = func(self, *args, **kwargs)
-            return group[result_key]
+            # if there is a missing arg, let the function complain
+            if max(i_arg_keys) > len(args):
+                return func(self, *args, **kwargs)
+
+            result_key = func_key + ', '
+            result_key += ', '.join(args[i-1] for i in i_arg_keys)
+
+            if result_key not in self._results:
+                self._results[result_key] = func(self, *args, **kwargs)
+
+            return self._results[result_key]
 
         return func_wrapper
     return persistent_result_decorator
@@ -123,20 +126,25 @@ class Patient(object):
                  result_file=None):
 
         self.dicom_dir = dicom_dir
-        self.result_file = result_file or os.path.join(dicom_dir, 'results.msgpk')
+        self.result_file = result_file or os.path.join(dicom_dir, 'results.npz')
 
         self.structure_aliases = structure_aliases
         self.dose_aliases = dose_aliases
 
+        self._results = {}
         if os.path.isfile(self.result_file):
-            with open(self.result_file, 'rb') as f:
-                self._results = msgpack.load(f, use_list=False)
-        else:
-            self._results = {}
+            with np.load(self.result_file) as f:
+                for k,v in f.items():
+                    if 'structure' in k:
+                        self._results[k] = np.unpackbits(v, axis=0).astype(bool)
+                    else:
+                        self._results[k] = v
 
     def write(self):
-        with open(self.result_file, 'wb') as f:
-            msgpack.dump(self._results, f)
+        for k,v in self._results.items():
+            if v.dtype == bool:
+                self._results[k] = np.packbits(v, axis=0)
+        np.savez_compressed(self.result_file, **self._results)
 
     @lazy_property
     def dicom(self):
@@ -152,18 +160,18 @@ class Patient(object):
 
     @translate_struct(1)
     @translate_grid(2)
-    @persistent_result('structure_masks', (1,2))
+    @persistent_result('structure_mask', (1,2))
     def structure_mask(self, struct_name, grid_name):
         return self.dicom.structure_mask(struct_name, grid_name)
 
     @translate_struct(1)
     @translate_grid(2)
-    @persistent_result('distances', (1,2))
+    @persistent_result('distance', (1,2))
     def distance_to_surface(self, struct_name, grid_name):
         mask = self.structure_mask(struct_name, grid_name)
         grid_spacing = self.dicom.grid_spacing(grid_name)
 
-        return distance_to_surface(mask, grid_spacing)
+        return distance_to_surface(mask, grid_spacing).astype(np.float16)
 
     @translate_grid(1)
     def grid_vectors(self, name):
