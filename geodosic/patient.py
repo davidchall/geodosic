@@ -4,6 +4,7 @@ from functools import wraps
 
 # third-party imports
 import numpy as np
+import h5py
 
 # project imports
 from .dicom import DicomCollection
@@ -52,13 +53,15 @@ def persistent_result(func_key, i_keys):
             if max(i_arg_keys) > len(args):
                 return func(self, *args, **kwargs)
 
-            result_key = func_key + ', '
-            result_key += ', '.join(args[i-1] for i in i_arg_keys)
+            result_key = ', '.join(args[i-1] for i in i_arg_keys)
 
-            if result_key not in self._results:
-                self._results[result_key] = func(self, *args, **kwargs)
+            group = self._results.require_group(func_key)
+            if result_key not in group:
+                result = func(self, *args, **kwargs)
+                group.create_dataset(result_key, data=result,
+                    compression="gzip", compression_opts=9)
 
-            return self._results[result_key]
+            return group[result_key][:]
 
         return func_wrapper
     return persistent_result_decorator
@@ -68,6 +71,9 @@ def translate_struct(i):
     def translate_decorator(func):
         @wraps(func)
         def func_wrapper(self, *args, **kwargs):
+            if i > len(args):
+                return func(self, *args, **kwargs)
+
             args = list(args)
             name = args[i-1]
             name = self.structure_aliases.get(name, name)
@@ -81,6 +87,9 @@ def translate_grid(i):
     def translate_decorator(func):
         @wraps(func)
         def func_wrapper(self, *args, **kwargs):
+            if i > len(args):
+                return func(self, *args, **kwargs)
+
             args = list(args)
             name = args[i-1]
             if name.lower() == 'default':
@@ -99,6 +108,9 @@ def translate_dose(i):
     def translate_decorator(func):
         @wraps(func)
         def func_wrapper(self, *args, **kwargs):
+            if i > len(args):
+                return func(self, *args, **kwargs)
+
             args = list(args)
             name = args[i-1]
             name = self.dose_aliases.get(name, name)
@@ -125,26 +137,18 @@ class Patient(object):
     def __init__(self, dicom_dir, structure_aliases={}, dose_aliases={},
                  result_file=None):
 
+        if not os.path.exists(dicom_dir):
+            raise ValueError('Input DICOM directory not found %s' % dicom_dir)
         self.dicom_dir = dicom_dir
-        self.result_file = result_file or os.path.join(dicom_dir, 'results.npz')
+        result_file = result_file or os.path.join(dicom_dir, 'results.hdf5')
 
         self.structure_aliases = structure_aliases
         self.dose_aliases = dose_aliases
 
-        self._results = {}
-        if os.path.isfile(self.result_file):
-            with np.load(self.result_file) as f:
-                for k,v in f.items():
-                    if 'structure' in k:
-                        self._results[k] = np.unpackbits(v, axis=0).astype(bool)
-                    else:
-                        self._results[k] = v
+        self._results = h5py.File(result_file, 'a')
 
-    def write(self):
-        for k,v in self._results.items():
-            if v.dtype == bool:
-                self._results[k] = np.packbits(v, axis=0)
-        np.savez_compressed(self.result_file, **self._results)
+    def close(self):
+        self._results.close()
 
     @lazy_property
     def dicom(self):
