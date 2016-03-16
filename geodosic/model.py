@@ -62,7 +62,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
     @initializer
     def __init__(self, dose_name=None, oar_name=None, target_name=None,
-                 shell_width=3.0, method='curve_fit'):
+                 shell_width=3.0):
         pass
 
     def fit(self, X, y=None, plot_file=None):
@@ -176,17 +176,16 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
         # fit data
-        if self.method == 'curve_fit':
-            p0 = (np.mean(dose), np.std(dose), ss.skew(dose))
-            p_upper = (2, 1, 1000)
-            p_lower = (-1, 0, -1000)
+        p0 = (np.mean(dose), np.std(dose), ss.skew(dose))
+        p_upper = (2, 1, 1000)
+        p_lower = (-1, 0, -1000)
 
-            try:
-                popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
-                                       p0=p0, bounds=(p_lower, p_upper))
-            except RuntimeError as e:
-                # if it's not converging, just use initial parameters
-                popt = p0
+        try:
+            popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
+                                   p0=p0, bounds=(p_lower, p_upper))
+        except RuntimeError as e:
+            # if it's not converging, just use initial parameters
+            popt = p0
 
         if self.pp:
             plt.plot(bin_centers, counts, drawstyle='steps-mid', label='Data')
