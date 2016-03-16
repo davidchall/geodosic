@@ -26,19 +26,9 @@ def persistent_result(func_key, i_keys):
     refers to must be strings.
 
         class Patient(object):
-
             @persistent_result('structure_mask', (1,2))
             def structure_mask(self, struct_name, grid_name):
                 return self.dicom.structure_mask(struct_name, grid_name)
-
-        This is used like so:
-            p = Patient(...)
-            mask = p.get_structure_mask('bladder', 'ct')
-
-        which would produce a result file like:
-        {
-            "structure_mask, bladder, ct": mask_array
-        }
     """
     def persistent_result_decorator(func):
         @wraps(func)

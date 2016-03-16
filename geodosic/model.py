@@ -153,10 +153,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             if self.pp:
                 self.iShell = i
 
-            try:
-                popt[i] = self._fit_shell(dose_shell)
-            except:
-                continue
+            popt[i] = self._fit_shell(dose_shell)
 
         return popt
 
@@ -178,24 +175,19 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         counts = np.append(counts, 0.)
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
-        # using scipy.stats.rv_continuous.fit (fit raw data)
-        # takes about 5 seconds per patient
-        if self.method == 'rv_continuous':
-            popt = skew_normal.fit(dose, ss.skew(dose),
-                                   loc=np.mean(dose), scale=np.std(dose))
-            popt = popt[-2:] + popt[:-2]
-
-        # using scipy.optimize.curve_fit (fit a histogram)
-        # takes about 1.7 seconds per patient
+        # fit data
         if self.method == 'curve_fit':
             p0 = (np.mean(dose), np.std(dose), ss.skew(dose))
             p_upper = (2, 1, 1000)
             p_lower = (-1, 0, -1000)
 
-            popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
-                                   p0=p0, bounds=(p_lower, p_upper))
+            try:
+                popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
+                                       p0=p0, bounds=(p_lower, p_upper))
+            except RuntimeError as e:
+                # if it's not converging, just use initial parameters
+                popt = p0
 
-        # takes about 5 seconds per patient
         if self.pp:
             plt.plot(bin_centers, counts, drawstyle='steps-mid', label='Data')
             x = np.linspace(np.amin(bin_centers), np.amax(bin_centers), 100)
