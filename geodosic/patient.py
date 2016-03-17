@@ -6,11 +6,13 @@ import json
 # third-party imports
 import numpy as np
 import h5py
+import matplotlib.pyplot as plt
 
 # project imports
 from .dicom import DicomCollection
-from .geometry import distance_to_surface
+from .geometry import distance_to_surface, bwperim
 from .utils import lazy_property
+from .dvh import DVH
 
 
 def persistent_result(func_key, i_keys):
@@ -188,3 +190,72 @@ class Patient(object):
 
     def ct_array(self):
         return self.dicom.ct_array()
+
+    def calculate_dvh(self, struct_name, dose_name, struct_normalize=None,
+                      dose_edges=None):
+        dose = self.dose_array(dose_name)
+        struct_mask = self.structure_mask(struct_name, dose_name)
+
+        if struct_normalize:
+            norm_mask = self.structure_mask(struct_normalize, dose_name)
+            dose /= np.mean(dose[norm_mask])
+
+        struct_dose = dose[struct_mask]
+
+        if not dose_edges:
+            eps = np.finfo(float).eps
+            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(struct_dose),
+                                               200, retstep=True)
+            dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
+
+        return DVH.from_raw(struct_dose, dose_edges)
+
+    def calculate_dsh(self, struct_name, dose_name, struct_normalize=None,
+                      dose_edges=None):
+        dose = self.dose_array(dose_name)
+        struct_mask = self.structure_mask(struct_name, dose_name)
+        struct_surface = bwperim(struct_mask)
+
+        if struct_normalize:
+            norm_mask = self.structure_mask(struct_normalize, dose_name)
+            dose /= np.mean(dose[norm_mask])
+
+        surface_dose = dose[struct_surface]
+
+        if not dose_edges:
+            eps = np.finfo(float).eps
+            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(surface_dose),
+                                               200, retstep=True)
+            dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
+
+        return DVH.from_raw(surface_dose, dose_edges)
+
+    def calculate_ovh(self, struct_name, target_name, grid_name,
+                      dist_edges=None):
+        dist = self.distance_to_surface(target_name, grid_name)
+        struct_mask = self.structure_mask(struct_name, grid_name)
+        struct_dist = dist[struct_mask]
+
+        if not dist_edges:
+            eps = np.finfo(float).eps
+            dist_edges, binwidth = np.linspace((1-eps)*np.amin(struct_dist),
+                                               (1+eps)*np.amax(struct_dist),
+                                               200, retstep=True)
+            dist_edges = np.append(dist_edges, (dist_edges[-1] + binwidth))
+
+        return DVH.from_raw(struct_dist, dist_edges, skip_checks=True)
+
+    def plot_dose_vs_distance(self, dose_name, struct_name, target_name):
+        dose = self.dose_array(dose_name)
+        dist = self.distance_to_surface(target_name, dose_name)
+        struct_mask = self.structure_mask(struct_name, dose_name)
+
+        struct_dose = dose[struct_mask]
+        struct_dist = dist[struct_mask]
+
+        dose_bins = np.arange(0, np.amax(struct_dose), 1)
+        dist_bins = np.arange(np.amin(struct_dist), np.amax(struct_dist), 1)
+
+        plt.hist2d(struct_dist, struct_dose, [dist_bins, dose_bins])
+        plt.xlabel('Distance-to-target [mm]')
+        plt.ylabel('Dose [Gy]')

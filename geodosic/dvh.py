@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 class DVH(object):
     """A class representing a dose-volume histogram."""
 
-    def __init__(self, volumes, dose_edges, dDVH=False):
+    def __init__(self, volumes, dose_edges, dDVH=False, skip_checks=False):
         """Initialize an instance of the DVH class.
 
         Parameters:
             volumes: ndarray
             dose_edges: ndarray of size len(volumes)+1
             dDVH: input differential DVH data instead
+            skip_checks: allow class to be used for quantities other than dose
         """
 
         if not np.all(np.diff(dose_edges) > 0):
@@ -29,15 +30,17 @@ class DVH(object):
             self.cDVH = np.array(volumes, float)
         self.dose_edges = np.array(dose_edges, float)
 
-        if self.cDVH[-1] != 0:
-            raise ValueError('Cumulative DVH does not reach zero.')
+        if not skip_checks:
+            if self.cDVH[-1] != 0:
+                raise ValueError('Cumulative DVH does not reach zero.')
 
-        if self.dose_edges[0] != 0:
-            raise ValueError('First dose edge must correspond to zero dose.')
+            if self.dose_edges[0] != 0:
+                raise ValueError('First dose edge must correspond to zero dose.')
 
     @classmethod
-    def from_raw(cls, voxel_data, dose_edges):
-        return cls(*np.histogram(voxel_data, bins=dose_edges), dDVH=True)
+    def from_raw(cls, voxel_data, dose_edges, skip_checks=False):
+        return cls(*np.histogram(voxel_data, bins=dose_edges), dDVH=True,
+                   skip_checks=skip_checks)
 
     @property
     def cDVH(self):

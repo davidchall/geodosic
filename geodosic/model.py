@@ -242,22 +242,19 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return DVH(dose_counts, dose_edges, dDVH=True)
 
     def score(self, X, y=None, plot=False):
-        preds = self.predict(X)
-        plans = []
-
-        dose_edges = preds[0].dose_edges
+        y_true, y_pred = [], []  # metric evaluated
         for p in X:
             dose = p.dose_array(self.dose_name)
             target_mask = p.structure_mask(self.target_name, self.dose_name)
-            oar_mask = p.structure_mask(self.oar_name, self.dose_name)
-
             target_dose = np.mean(dose[target_mask])
-            dose /= target_dose
 
-            plans.append(DVH.from_raw(dose[oar_mask], dose_edges))
+            dvh_pred = self.predict_patient(p)
+            dvh_pred.dose_edges *= target_dose
+            y_pred.append(dvh_pred.mean())
 
-        y_true = [dvh.mean() for dvh in plans]
-        y_pred = [dvh.mean() for dvh in preds]
+            dvh_plan = p.calculate_dvh(self.oar_name, self.dose_name)
+            y_true.append(dvh_plan.mean())
+
         r2 = r2_score(y_true, y_pred)
 
         if plot:
@@ -266,7 +263,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.plot([0, max_val], [0, max_val], ':')
             plt.xlabel('Planned metric')
             plt.ylabel('Predicted metric')
-            plt.text(0.05, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
+            plt.text(0.1*max_val, 0.9*max_val, 'R^2 = {0:.1%}'.format(r2))
             plt.axis('square')
             plt.axis([0, max_val, 0, max_val])
 
