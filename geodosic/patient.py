@@ -1,6 +1,7 @@
 # system imports
 import os.path
 from functools import wraps
+import json
 
 # third-party imports
 import numpy as np
@@ -45,7 +46,7 @@ def persistent_result(func_key, i_keys):
 
             result_key = ', '.join(args[i-1] for i in i_arg_keys)
 
-            group = self._results.require_group(func_key)
+            group = self.results.require_group(func_key)
             if result_key not in group:
                 result = func(self, *args, **kwargs)
                 group.create_dataset(result_key, data=result,
@@ -124,21 +125,27 @@ class Patient(object):
     class, and this allows these two classes to be used interchangeably in
     plotting and estimator routines.
     """
-    def __init__(self, dicom_dir, structure_aliases={}, dose_aliases={},
-                 result_file=None):
+    def __init__(self, dicom_dir):
 
-        if not os.path.exists(dicom_dir):
+        if not os.path.isdir(dicom_dir):
             raise ValueError('Input DICOM directory not found %s' % dicom_dir)
         self.dicom_dir = dicom_dir
-        result_file = result_file or os.path.join(dicom_dir, 'results.hdf5')
 
-        self.structure_aliases = structure_aliases
-        self.dose_aliases = dose_aliases
+        config_fname = os.path.join(dicom_dir, 'config.json')
+        if os.path.isfile(config_fname):
+            with open(config_fname, 'r') as f:
+                config = json.load(f)
+            self.structure_aliases = config['structure_aliases']
+            self.dose_aliases = config['dose_aliases']
+        else:
+            self.structure_aliases = {}
+            self.dose_aliases = {}
 
-        self._results = h5py.File(result_file, 'a')
+        result_fname = os.path.join(dicom_dir, 'intermediate-results.hdf5')
+        self.results = h5py.File(result_fname, 'a')
 
     def close(self):
-        self._results.close()
+        self.results.close()
 
     @lazy_property
     def dicom(self):
