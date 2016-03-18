@@ -65,6 +65,32 @@ def bin_distance(min_dist, max_dist, width):
     return i_shell, dist_edges
 
 
+def centroid(density, grid, indices=False):
+    """Returns the centroid of a 3-d solid.
+
+    Parameters:
+        density: 3-d ndarray used to calculate center-of-mass
+        grid: (x,y,z) coordinate vectors of the mask
+        indices: if True, will return indices instead of coordinates
+
+    Returns:
+        x0,y0,z0: coordinates (or indices) of centroid
+    """
+    x, y, z = grid
+    xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
+
+    x0 = np.average(xx, weights=density)
+    y0 = np.average(yy, weights=density)
+    z0 = np.average(zz, weights=density)
+
+    if indices:
+        x0 = np.argmin(np.fabs(x - x0))
+        y0 = np.argmin(np.fabs(y - y0))
+        z0 = np.argmin(np.fabs(z - z0))
+
+    return x0, y0, z0
+
+
 def interpolate_grids(values, old_grid, new_grid):
     """Interpolate data from one regular grid to another.
 
