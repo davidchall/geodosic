@@ -166,7 +166,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         Returns:
             popt: tuple of best-fit parameters
         """
-
         # bin the data and add empty bins at either end to constrain fit
         counts, bin_edges = histogram(dose, bins='freedman', density=True)
         bin_edges = np.insert(bin_edges, 0, 2*bin_edges[0]-bin_edges[1])
@@ -184,7 +183,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(p_lower, p_upper))
         except RuntimeError as e:
-            # if it's not converging, just use initial parameters
+            # if convergence fails, just use initial parameters
             popt = p0
 
         if self.pp:
@@ -241,7 +240,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_counts[-1] = 0
         return DVH(dose_counts, dose_edges, dDVH=True)
 
-    def score(self, X, y=None, plot=False):
+    def score(self, X, y=None, normalize=False, plot=False):
         y_true, y_pred = [], []  # metric evaluated
         for p in X:
             dose = p.dose_array(self.dose_name)
@@ -250,9 +249,13 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             dvh_pred = self.predict_patient(p)
             dvh_pred.dose_edges *= target_dose
-            y_pred.append(dvh_pred.mean())
-
             dvh_plan = p.calculate_dvh(self.oar_name, self.dose_name)
+
+            if normalize:
+                dvh_pred.dose_edges /= target_dose
+                dvh_plan.dose_edges /= target_dose
+
+            y_pred.append(dvh_pred.mean())
             y_true.append(dvh_plan.mean())
 
         r2 = r2_score(y_true, y_pred)
