@@ -119,6 +119,9 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
                  structures=[]):
     """Plot a grayscale scan with a color overlay and outlined structures.
 
+    Warning!! When saving the figure, it may be necessary to increase the
+    DPI (~200) in order for structure outlines to display correctly.
+
     Parameters:
         scan:           3D scan array
         grid_scan:      (x,y,z) coordinate vectors of scan
@@ -257,12 +260,12 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
         if np.any(slice_perim_scan):
             slice_perim_scan = np.ma.masked_equal(slice_perim_scan, False)
             fig = plt.imshow(slice_perim_scan, extent=extent_scan,
-                             cmap='binary')
+                             cmap='binary', interpolation='none')
 
         if np.any(slice_perim_overlay):
             slice_perim_overlay = np.ma.masked_equal(slice_perim_overlay, False)
             fig = plt.imshow(slice_perim_overlay, extent=extent_overlay,
-                             cmap='binary')
+                             cmap='binary', interpolation='none')
 
     # tidy up
     fig.axes.get_xaxis().set_ticks([])
