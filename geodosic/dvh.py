@@ -65,7 +65,7 @@ class DVH(object):
     def dose_centers(self):
         return 0.5 * (self.dose_edges[1:] + self.dose_edges[:-1])
 
-    def plot(self, dDVH=False, label=None):
+    def plot(self, *args, dDVH=False, **kwargs):
         """Plot the cumulative dose-volume histogram with matplotlib.
 
         Parameters:
@@ -74,7 +74,7 @@ class DVH(object):
         """
         x = self.dose_centers
         y = self.dDVH if dDVH else self.cDVH
-        plt.plot(x, y, drawstyle='steps-mid', label=label)
+        plt.plot(x, y, *args, **kwargs)
 
     def min(self):
         """Return the minimum dose.
