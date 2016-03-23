@@ -202,7 +202,7 @@ class Patient(object):
 
         struct_dose = dose[struct_mask]
 
-        if not dose_edges:
+        if dose_edges is None:
             eps = np.finfo(float).eps
             dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(struct_dose),
                                                200, retstep=True)
@@ -222,7 +222,7 @@ class Patient(object):
 
         surface_dose = dose[struct_surface]
 
-        if not dose_edges:
+        if dose_edges is None:
             eps = np.finfo(float).eps
             dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(surface_dose),
                                                200, retstep=True)
@@ -236,7 +236,7 @@ class Patient(object):
         struct_mask = self.structure_mask(struct_name, grid_name)
         struct_dist = dist[struct_mask]
 
-        if not dist_edges:
+        if dist_edges is None:
             eps = np.finfo(float).eps
             dist_edges, binwidth = np.linspace((1-eps)*np.amin(struct_dist),
                                                (1+eps)*np.amax(struct_dist),
