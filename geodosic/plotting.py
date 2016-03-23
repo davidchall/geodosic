@@ -116,7 +116,7 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
                  window='default', cbar_scan=False,
                  lim_overlay='global', cbar_overlay=True,
                  alpha=0.5, invisible_zero=False,
-                 structures=[]):
+                 structures=[], ax=None):
     """Plot a grayscale scan with a color overlay and outlined structures.
 
     Warning!! When saving the figure, it may be necessary to increase the
@@ -165,7 +165,8 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
     if c_slice > np.amax(c_overlay) or c_slice < np.amin(c_overlay):
         plot_overlay = False
 
-    fig, ax = plt.subplots()
+    if ax is None:
+        ax = plt.gca()
 
     ###########################
     #        plot scan        #
@@ -189,7 +190,7 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
     X, Y, slice_scan = slice_array(array_scan, grid_scan, i_scan, view, origin='lower')
     cax = ax.pcolorfast(X, Y, slice_scan, cmap=cm.bone, vmin=min_scan, vmax=max_scan)
     if cbar_scan:
-        fig.colorbar(cax)  # this colorbar is not scaled to the figure size
+        cax.axes.figure.colorbar(cax)  # this colorbar is not scaled to the figure size
 
     ##########################
     #      plot overlay      #
@@ -267,5 +268,3 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
     ax.axes.get_xaxis().set_ticks([])
     ax.axes.get_yaxis().set_ticks([])
     ax.set_aspect('equal')
-
-    return fig
