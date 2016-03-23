@@ -5,6 +5,7 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
+from mpl_toolkits import axes_grid1
 
 # project imports
 from .geometry import bwperim
@@ -30,15 +31,16 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
     """Takes a slice through a 3D array.
 
     Parameters:
-        array_3d: numpy.ndarray with shape (m1, m2, m3)
+        array_3d: ndarray with shape (m1, m2, m3)
         grid:     (x,y,z) coordinate vectors of array_3d
         i:        sliced frame
         view:     which plane to slice {'sag', 'cor', 'tra'}
         origin:   first array index plotted in {'upper', 'lower'} left corner
 
     Returns:
-        array_2d: numpy.ndarray with shape (mx, my) that depends upon view
-        extent:   location of lower-left and upper-right corners
+        axis_X:   ndarray with shape (mx+1,) specifying pixel X edges
+        axis_Y:   ndarray with shape (my+1,) specifying pixel Y edges
+        array_2d: ndarray with shape (mx, my) that depends upon view
     """
 
     if origin not in ('upper', 'lower'):
@@ -50,7 +52,7 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
     # y-axis: increasing to posterior
     # z-axis: increasing to superior
 
-    # plt.imshow expects [i,j] -> [row,column]
+    # imshow and pcolor expect [i,j] -> [row,column]
     x, y, z = grid
 
     # sagittal image: {bottom, left} -> {inferior, anterior}
@@ -61,14 +63,8 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
             i = -1
 
         array_2d = array_3d[i,:,:].T
-        left, right = np.amin(y), np.amax(y)
-        bottom, top = np.amin(z), np.amax(z)
-
-        if np.all(np.diff(y) < 0):
-            array_2d = np.fliplr(array_2d)
-
-        if np.all(np.diff(z) < 0):
-            array_2d = np.flipud(array_2d)
+        axis_X = y
+        axis_Y = z
 
     # coronal image: {bottom, left} -> {inferior, patient's right}
     elif view in coronal_aliases:
@@ -78,16 +74,11 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
             i = -1
 
         array_2d = array_3d[:,i,:].T
-        left, right = np.amin(x), np.amax(x)
-        bottom, top = np.amin(z), np.amax(z)
-
-        if np.all(np.diff(x) < 0):
-            array_2d = np.fliplr(array_2d)
-
-        if np.all(np.diff(z) < 0):
-            array_2d = np.flipud(array_2d)
+        axis_X = x
+        axis_Y = z
 
     # transverse image: {bottom, left} -> {posterior, patient's right}
+    # note that the y-axis must be reversed when plotting
     elif view in transverse_aliases:
 
         if i >= array_3d.shape[2]:
@@ -95,21 +86,30 @@ def slice_array(array_3d, grid, i, view, origin='upper'):
             i = -1
 
         array_2d = array_3d[:,:,i].T
-        array_2d = np.flipud(array_2d)
-        left, right = np.amin(x), np.amax(x)
-        bottom, top = np.amax(y), np.amin(y)
-
-        if np.all(np.diff(y) < 0):
-            array_2d = np.fliplr(array_2d)
-
-        if np.all(np.diff(x) < 0):
-            array_2d = np.flipud(array_2d)
+        axis_X = x
+        axis_Y = y
 
     if origin == 'upper':
         array_2d = np.flipud(array_2d)
+        axis_Y = axis_Y[::-1]
 
-    extent = (left, right, bottom, top)
-    return array_2d, extent
+    # convert bin-centers to bin-edges for pcolor
+    axis_X = np.append(axis_X, axis_X[-1] + np.diff(axis_X)[-1])
+    axis_Y = np.append(axis_Y, axis_Y[-1] + np.diff(axis_Y)[-1])
+
+    return axis_X, axis_Y, array_2d
+
+
+def add_colorbar(im, aspect=20, pad_fraction=0.5, **kwargs):
+    """Add a vertical color bar to an image plot, that is scaled to match the
+    size of the figure."""
+    divider = axes_grid1.make_axes_locatable(im.axes)
+    width = axes_grid1.axes_size.AxesY(im.axes, aspect=1/aspect)
+    pad = axes_grid1.axes_size.Fraction(pad_fraction, width)
+    current_ax = plt.gca()
+    cax = divider.append_axes("right", size=width, pad=pad)
+    plt.sca(current_ax)
+    return im.axes.figure.colorbar(im, cax=cax, **kwargs)
 
 
 def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
@@ -165,6 +165,8 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
     if c_slice > np.amax(c_overlay) or c_slice < np.amin(c_overlay):
         plot_overlay = False
 
+    fig, ax = plt.subplots()
+
     ###########################
     #        plot scan        #
     ###########################
@@ -184,20 +186,16 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
 
     min_scan = window_center - window_width/2.0
     max_scan = window_center + window_width/2.0
-    slice_scan, extent = slice_array(array_scan, grid_scan, i_scan, view)
-    fig = plt.imshow(slice_scan, extent=extent,
-                     cmap=cm.bone, vmin=min_scan, vmax=max_scan)
+    X, Y, slice_scan = slice_array(array_scan, grid_scan, i_scan, view, origin='lower')
+    cax = ax.pcolorfast(X, Y, slice_scan, cmap=cm.bone, vmin=min_scan, vmax=max_scan)
     if cbar_scan:
-        plt.colorbar()
-
-    plt.hold(True)
+        fig.colorbar(cax)  # this colorbar is not scaled to the figure size
 
     ##########################
     #      plot overlay      #
     ##########################
     if plot_overlay:
-        slice_overlay, extent = slice_array(array_overlay, grid_overlay,
-                                            i_overlay, view)
+        X, Y, slice_overlay = slice_array(array_overlay, grid_overlay, i_overlay, view, origin='lower')
         if lim_overlay == 'global':
             min_overlay = np.amin(array_overlay)
             max_overlay = np.amax(array_overlay)
@@ -223,13 +221,13 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
             slice_overlay = slice_overlay.copy()
             slice_overlay[slice_overlay == 0] = -1
 
-        fig = plt.imshow(slice_overlay, extent=extent, alpha=alpha,
-                         cmap=cm_overlay, vmin=min_overlay, vmax=max_overlay)
+        cax = ax.pcolorfast(X, Y, slice_overlay, alpha=alpha, cmap=cm_overlay, vmin=min_overlay, vmax=max_overlay)
         if invisible_zero:
-            clim = fig.get_clim()
-            fig.set_clim((0, clim[1]))
+            clim = cax.get_clim()
+            cax.set_clim((0, clim[1]))
         if cbar_overlay:
-            plt.colorbar()
+            cbar = add_colorbar(cax)
+            cbar.solids.set(alpha=1.0)
 
     #######################################
     #      plot structure perimeters      #
@@ -242,13 +240,11 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
             slice_mask_shape = mask.shape[:dim] + mask.shape[dim+1:]
 
             if set(slice_mask_shape) == set(slice_scan.shape):
-                slice_mask, extent_scan = slice_array(mask, grid_scan,
-                                                      i_scan, view)
+                X, Y, slice_mask = slice_array(mask, grid_scan, i_scan, view, origin='lower')
                 slice_perim_scan += bwperim(slice_mask)
 
             elif set(slice_mask_shape) == set(slice_overlay.shape):
-                slice_mask, extent_overlay = slice_array(mask, grid_overlay,
-                                                         i_overlay, view)
+                X, Y, slice_mask = slice_array(mask, grid_overlay, i_overlay, view, origin='lower')
                 slice_perim_overlay += bwperim(slice_mask)
 
             else:
@@ -259,14 +255,17 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
         # and matplotlib makes these pixels transparent
         if np.any(slice_perim_scan):
             slice_perim_scan = np.ma.masked_equal(slice_perim_scan, False)
-            fig = plt.imshow(slice_perim_scan, extent=extent_scan,
-                             cmap='binary', interpolation='none')
+            cax = ax.pcolorfast(X, Y, slice_perim_scan, cmap='binary')
 
         if np.any(slice_perim_overlay):
             slice_perim_overlay = np.ma.masked_equal(slice_perim_overlay, False)
-            fig = plt.imshow(slice_perim_overlay, extent=extent_overlay,
-                             cmap='binary', interpolation='none')
+            cax = ax.pcolorfast(X, Y, slice_perim_overlay, cmap='binary')
 
     # tidy up
-    fig.axes.get_xaxis().set_ticks([])
-    fig.axes.get_yaxis().set_ticks([])
+    if view in transverse_aliases:
+        ax.invert_yaxis()
+    ax.axes.get_xaxis().set_ticks([])
+    ax.axes.get_yaxis().set_ticks([])
+    ax.set_aspect('equal')
+
+    return fig
