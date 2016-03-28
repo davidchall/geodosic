@@ -16,16 +16,6 @@ from .geometry import distance_to_surface, bin_distance
 from .dvh import DVH
 
 
-class skew_normal_gen(ss.rv_continuous):
-    def _argcheck(self, skew):
-        return np.isfinite(skew)
-
-    def _pdf(self, x, skew):
-        return 2 * ss.norm.pdf(x) * ss.norm.cdf(x * skew)
-
-skew_normal = skew_normal_gen(name='skew-normal')
-
-
 def skew_normal_pdf(x, e=0, w=1, a=0):
     """PDF for skew-normal distribution.
 
@@ -38,7 +28,7 @@ def skew_normal_pdf(x, e=0, w=1, a=0):
     return 2 / w * ss.norm.pdf(t) * ss.norm.cdf(a*t)
 
 
-def initializer(func):
+def initialize_attributes(func):
     """Decorator that automatically assigns parameters to attributes."""
     names, varargs, keywords, defaults = inspect.getargspec(func)
 
@@ -59,9 +49,9 @@ def initializer(func):
 class ShellDoseFitModel(BaseEstimator, RegressorMixin):
     """docstring for DVHEstimator"""
 
-    @initializer
+    @initialize_attributes
     def __init__(self, dose_name=None, oar_name=None, target_name=None,
-                 shell_width=3.0):
+                 shell_width=3.0, min_shell_size_fit=10):
         pass
 
     def fit(self, X, y=None, plot_file=None):
@@ -146,7 +136,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             dose_shell = dose_oar[(dist_oar > inner) & (dist_oar <= outer)]
 
-            if dose_shell.size < 4:
+            if dose_shell.size < self.min_shell_size_fit:
                 continue
 
             if self.pp:
