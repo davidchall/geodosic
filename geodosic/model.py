@@ -55,7 +55,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                  shell_width=3.0, min_shell_size_fit=10):
         pass
 
-    def fit(self, X, y=None, plot_file=None):
+    def fit(self, X, y=None, plot_fits=None, plot_params=None):
         """Train the model.
 
         Parameters:
@@ -68,7 +68,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         assert self.target_name is not None
         assert self.shell_width > 0
 
-        self.pp = PdfPages(plot_file) if plot_file else None
+        self.pp = PdfPages(plot_fits) if plot_fits else None
         if self.pp:
             self.iPatient = 0
 
@@ -89,12 +89,50 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         for i in range(min_i, max_i+1):
             if i == 0:
                 continue
+
             popt_all_i = np.array([popt[i] for popt in popt_all if i in popt])
             if popt_all_i.size == 0:
                 raise RuntimeError('Uncovered shell: {0}'.format(i))
 
             self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
             self.popt_std_[i] = np.std(popt_all_i, axis=0)
+
+        if plot_params:
+            self.pp = PdfPages(plot_params)
+
+            i_shell = np.array(sorted(list(self.popt_avg_.keys())))
+            yp = zip(*(self.popt_avg_[i] for i in i_shell))
+            dyp = zip(*(self.popt_std_[i] for i in i_shell))
+            x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
+            xs = np.linspace(np.amin(x), np.amax(x), 100)
+
+            for param, (y, dy) in enumerate(zip(yp, dyp)):
+                print(dy)
+                plt.errorbar(x, y, dy, fmt='ko')
+                spline = fit_spline(x, y, dy)
+                plt.plot(xs, spline(xs))
+                plt.xlabel('Distance-to-target [mm]')
+                plt.ylabel('Average parameter')
+                plt.title('Parameter %i' % (param+1))
+
+                self.pp.savefig()
+                plt.clf()
+
+            for param in range(len(next(iter(self.popt_avg_.values())))):
+                for popt in popt_all:
+                    i_shell = np.array(sorted(list(popt.keys())))
+                    y = np.array([popt[i][param] for i in i_shell])
+                    x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
+                    plt.plot(x, y, 'o')
+                    plt.xlabel('Distance-to-target [mm]')
+                    plt.ylabel('Best-fit parameter')
+                    plt.title('Parameter %i' % (param+1))
+
+                self.pp.savefig()
+                plt.clf()
+
+            self.pp.close()
+            del self.pp
 
         return self
 
@@ -287,7 +325,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             dvh_pred = self.predict_patient(p)
             dvh_pred.dose_edges *= target_dose
-            dvh_plan = p.calculate_dvh(self.oar_name, self.dose_name)
+            dvh_plan = p.calculate_dvh(self.oar_name, self.dose_name,
+                dose_edges=dvh_pred.dose_edges)
 
             if normalize:
                 dvh_pred.dose_edges /= target_dose
@@ -299,9 +338,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         r2 = r2_score(y_true, y_pred)
 
         if plot:
-            plt.scatter(y_true, y_pred)
+            plt.scatter(y_true, y_pred, c='k')
             max_val = 1.1*max(*y_true, *y_pred)
-            plt.plot([0, max_val], [0, max_val], ':')
+            plt.plot([0, max_val], [0, max_val], 'k:')
             plt.xlabel('Planned metric')
             plt.ylabel('Predicted metric')
             plt.text(0.1*max_val, 0.9*max_val, 'R^2 = {0:.1%}'.format(r2))
