@@ -1,6 +1,7 @@
 # standard imports
 import inspect
 from functools import wraps
+from math import ceil
 
 # third-party imports
 import numpy as np
@@ -73,6 +74,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         # fit dose shells for all patients
         popt_all = [self._fit_patient(p) for p in X]
+        popt_all = [popt for popt in popt_all if popt is not None]
 
         if self.pp:
             self.pp.close()
@@ -83,7 +85,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         max_i = max(max(popt.keys()) for popt in popt_all)
 
         # compute average best-fit parameters for each shell
-        self.popt_avg_ = {}
+        self.popt_avg_, self.popt_std_ = {}, {}
         for i in range(min_i, max_i+1):
             if i == 0:
                 continue
@@ -92,6 +94,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 raise RuntimeError('Uncovered shell: {0}'.format(i))
 
             self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
+            self.popt_std_[i] = np.std(popt_all_i, axis=0)
 
         return self
 
@@ -200,43 +203,76 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         return popt
 
-    def predict(self, X):
-        return [self.predict_patient(p) for p in X]
+    def predict(self, X, *args, **kwargs):
+        return [self.predict_patient(p, *args, **kwargs) for p in X]
 
-    def predict_patient(self, p):
+    def predict_patient(self, p, max_size_voxelwise=1000, grid_name='default'):
         if self.oar_name not in p.structure_names:
             return
         if self.target_name not in p.structure_names:
             return
 
-        oar_mask = p.structure_mask(self.oar_name, 'default')
-        dist = p.distance_to_surface(self.target_name, 'default')
-        dist_oar = dist[oar_mask]
+        min_fitted_i = min(self.popt_avg_.keys())
+        max_fitted_i = max(self.popt_avg_.keys())
 
+        oar_mask = p.structure_mask(self.oar_name, grid_name)
+        dist = p.distance_to_surface(self.target_name, grid_name)
+        dist_oar = dist[oar_mask]
         min_dist = np.amin(dist_oar)
         max_dist = np.amax(dist_oar)
-        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
         dose_edges = np.linspace(0., 1.2, 120)
         dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
         dose_counts = np.zeros_like(dose_centers)
 
-        min_fitted_i = min(self.popt_avg_.keys())
-        max_fitted_i = max(self.popt_avg_.keys())
+        oar_size = dist_oar.size
+        if oar_size <= max_size_voxelwise:
+            i_shell = np.array(sorted(list(self.popt_avg_.keys())))
+            yp = zip(*(self.popt_avg_[i] for i in i_shell if i in self.popt_avg_))
+            dyp = zip(*(self.popt_std_[i] for i in i_shell if i in self.popt_std_))
+            x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
 
-        for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
+            splines = []
+            for param, (y, dy) in enumerate(zip(yp, dyp)):
+                splines.append(fit_spline(x, y, dy))
 
-            if i < min_fitted_i:
-                popt = self.popt_avg_[min_fitted_i]
-            elif i > max_fitted_i:
-                popt = self.popt_avg_[max_fitted_i]
-            else:
-                popt = self.popt_avg_[i]
+            for dist_voxel in dist_oar:
+                if dist_voxel < np.amin(x):
+                    popt = self.popt_avg_[min_fitted_i]
+                elif dist_voxel > np.amax(x):
+                    popt = self.popt_avg_[max_fitted_i]
+                else:
+                    popt = [spline(dist_voxel) for spline in splines]
 
-            shell = (dist_oar > inner) & (dist_oar < outer)
-            n_voxels_shell = np.count_nonzero(shell)
-            dose_shell = skew_normal_pdf(dose_centers, *popt)
-            dose_counts += n_voxels_shell * dose_shell
+                if np.all(popt == 0):
+                    continue
+                else:
+                    dose_counts += skew_normal_pdf(dose_centers, *popt)
+
+        else:
+            i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
+
+            for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
+
+                shell = (dist_oar > inner) & (dist_oar < outer)
+                n_voxels_shell = np.count_nonzero(shell)
+                if n_voxels_shell == 0:
+                    continue
+
+                if i < min_fitted_i:
+                    popt = self.popt_avg_[min_fitted_i]
+                elif i > max_fitted_i:
+                    popt = self.popt_avg_[max_fitted_i]
+                elif i not in self.popt_avg_:
+                    popt = self.popt_avg_[i-1]
+                else:
+                    popt = self.popt_avg_[i]
+
+                if np.all(popt == 0):
+                    continue
+                else:
+                    dose_shell = skew_normal_pdf(dose_centers, *popt)
+                    dose_counts += n_voxels_shell * dose_shell
 
         # parametric fits yield long tails, but DVH requires last bin is zero
         dose_counts[-1] = 0
@@ -273,3 +309,12 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.axis([0, max_val, 0, max_val])
 
         return r2
+
+
+def fit_spline(x, y, dy):
+    from scipy.interpolate import UnivariateSpline
+    dy = np.clip(dy, 1e-6*np.mean(dy), np.amax(dy))
+    weights = np.power(dy, -2)
+    spline = UnivariateSpline(x, y, w=weights, s=0.9)
+
+    return spline
