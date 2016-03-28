@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import scipy.stats as ss
-from astropy.stats import histogram
 from sklearn.base import BaseEstimator, RegressorMixin
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
@@ -167,11 +166,24 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt: tuple of best-fit parameters
         """
         # bin the data and add empty bins at either end to constrain fit
-        counts, bin_edges = histogram(dose, bins='freedman', density=True)
+        min_bin_width = 1e-5
+        max_n_bins = 100
+        if np.all(dose == dose[0]):
+            bin_edges = [dose[0], dose[0]+min_bin_width]
+        else:
+            min_dose, max_dose = np.amin(dose), np.amax(dose)
+            q75, q25 = np.percentile(dose, [75, 25])
+            bin_width = 2 * (q75-q25) / np.power(dose.size, 1./3.)
+            bin_width = max(bin_width, min_bin_width)
+            n_bins = ceil((max_dose-min_dose) / bin_width)
+            n_bins = min(n_bins, max_n_bins-2)
+            bin_edges = np.linspace(min_dose, max_dose, n_bins+1)
+
+        # add empty bins at either end to further constrain fit
         bin_edges = np.insert(bin_edges, 0, 2*bin_edges[0]-bin_edges[1])
         bin_edges = np.append(bin_edges, 2*bin_edges[-1]-bin_edges[-2])
-        counts = np.insert(counts, 0, 0.)
-        counts = np.append(counts, 0.)
+
+        counts, bin_edges = np.histogram(dose, bin_edges, density=True)
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
         # fit data
