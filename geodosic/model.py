@@ -145,7 +145,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         popt = {}
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
-            dose_shell = dose_oar[(dist_oar > inner) & (dist_oar < outer)]
+            dose_shell = dose_oar[(dist_oar > inner) & (dist_oar <= outer)]
 
             if dose_shell.size < 4:
                 continue
