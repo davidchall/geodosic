@@ -1,4 +1,5 @@
 # standard imports
+import os
 import inspect
 from functools import wraps
 from math import ceil
@@ -13,7 +14,7 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
 # project imports
-from .geometry import distance_to_surface, bin_distance
+from .geometry import distance_to_surface, bin_distance, interpolate_grids
 from .dvh import DVH
 
 
@@ -51,8 +52,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
     """docstring for DVHEstimator"""
 
     @initialize_attributes
-    def __init__(self, dose_name=None, oar_name=None, target_name=None,
-                 shell_width=3.0, min_shell_size_fit=10):
+    def __init__(self, dose_name=None, oar_names=None, target_name=None,
+                 grid_name=None, shell_width=3.0, min_shell_size_fit=10):
         pass
 
     def fit(self, X, y=None, plot_fits=None, plot_params=None):
@@ -64,16 +65,26 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         # validate model parameters
         assert self.dose_name is not None
-        assert self.oar_name is not None
+        assert self.oar_names is not None
         assert self.target_name is not None
         assert self.shell_width > 0
+        assert self.min_shell_size_fit > 0
+
+        if self.grid_name is None:
+            self.grid_name = self.dose_name
+
+        if isinstance(self.oar_names, str):
+            self.oar_names = [self.oar_names]
 
         self.pp = PdfPages(plot_fits) if plot_fits else None
         if self.pp:
             self.iPatient = 0
 
         # fit dose shells for all patients
-        popt_all = [self._fit_patient(p) for p in X]
+        popt_all = []
+        for p in X:
+            for oar_name in self.oar_names:
+                popt_all.append(self._fit_structure(p, oar_name))
         popt_all = [popt for popt in popt_all if popt is not None]
 
         if self.pp:
@@ -107,7 +118,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             xs = np.linspace(np.amin(x), np.amax(x), 100)
 
             for param, (y, dy) in enumerate(zip(yp, dyp)):
-                print(dy)
                 plt.errorbar(x, y, dy, fmt='ko')
                 spline = fit_spline(x, y, dy)
                 plt.plot(xs, spline(xs))
@@ -123,7 +133,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                     i_shell = np.array(sorted(list(popt.keys())))
                     y = np.array([popt[i][param] for i in i_shell])
                     x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
-                    plt.plot(x, y, 'o')
+                    plt.plot(x, y, 'o', markeredgewidth=0.0)
                     plt.xlabel('Distance-to-target [mm]')
                     plt.ylabel('Best-fit parameter')
                     plt.title('Parameter %i' % (param+1))
@@ -136,14 +146,15 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         return self
 
-    def _fit_patient(self, p):
+    def _fit_structure(self, p, oar_name):
         """Find correlations between dose and distance-to-target for a single
-        patient. This method splits the dose array into shells surrounding the
-        target volume, and also selects only voxels within the organ-at-risk.
-        The actual fitting is handled by _fit_shell().
+        organ-at-risk structure. This method splits the dose array into shells
+        surrounding the target volume, and also selects only voxels within the
+        OAR. The actual fitting is handled by _fit_shell().
 
         Parameters:
             p: a patient object
+            oar_name: string to identify the OAR structure in the patient
 
         Returns:
             popt: dict of (i: popt_i) pairs, where popt_i is a tuple containing
@@ -152,17 +163,21 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         if self.dose_name not in p.dose_names:
             return
 
-        if self.oar_name not in p.structure_names:
+        if oar_name not in p.structure_names:
+            return
+
+        if self.target_name not in p.structure_names:
+            logging.error('Could not find "%s" in %s' % (self.target_name, p.dicom_dir))
             return
 
         if self.pp:
             self.iPatient += 1
 
-        target_mask = p.structure_mask(self.target_name, self.dose_name)
-        oar_mask = p.structure_mask(self.oar_name, self.dose_name)
-        dist = p.distance_to_surface(self.target_name, self.dose_name)
+        target_mask = p.structure_mask(self.target_name, self.grid_name)
+        oar_mask = p.structure_mask(oar_name, self.grid_name)
+        dist = p.distance_to_surface(self.target_name, self.grid_name)
 
-        dose = p.dose_array(self.dose_name)
+        dose = p.dose_array(self.dose_name, self.grid_name)
         target_dose = np.mean(dose[target_mask])
         dose /= target_dose
 
@@ -242,10 +257,17 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return popt
 
     def predict(self, X, *args, **kwargs):
-        return [self.predict_patient(p, *args, **kwargs) for p in X]
+        if isinstance(self.oar_names, str):
+            self.oar_names = [self.oar_names]
 
-    def predict_patient(self, p, max_size_voxelwise=1000, grid_name='default'):
-        if self.oar_name not in p.structure_names:
+        pred = []
+        for p in X:
+            for oar_name in self.oar_names:
+                pred.append(self.predict_structure(p, oar_name, *args, **kwargs))
+        return pred
+
+    def predict_structure(self, p, oar_name, max_size_voxelwise=1000):
+        if oar_name not in p.structure_names:
             return
         if self.target_name not in p.structure_names:
             return
@@ -253,8 +275,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         min_fitted_i = min(self.popt_avg_.keys())
         max_fitted_i = max(self.popt_avg_.keys())
 
-        oar_mask = p.structure_mask(self.oar_name, grid_name)
-        dist = p.distance_to_surface(self.target_name, grid_name)
+        oar_mask = p.structure_mask(oar_name, self.grid_name)
+        dist = p.distance_to_surface(self.target_name, self.grid_name)
         dist_oar = dist[oar_mask]
         min_dist = np.amin(dist_oar)
         max_dist = np.amax(dist_oar)
@@ -317,23 +339,32 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return DVH(dose_counts, dose_edges, dDVH=True)
 
     def score(self, X, y=None, normalize=False, plot=False):
+        if isinstance(self.oar_names, str):
+            self.oar_names = [self.oar_names]
+
         y_true, y_pred = [], []  # metric evaluated
         for p in X:
-            dose = p.dose_array(self.dose_name)
-            target_mask = p.structure_mask(self.target_name, self.dose_name)
-            target_dose = np.mean(dose[target_mask])
+            for oar_name in self.oar_names:
+                if oar_name not in p.structure_names or \
+                  self.target_name not in p.structure_names or \
+                  self.dose_name not in p.dose_names:
+                    continue
 
-            dvh_pred = self.predict_patient(p)
-            dvh_pred.dose_edges *= target_dose
-            dvh_plan = p.calculate_dvh(self.oar_name, self.dose_name,
-                dose_edges=dvh_pred.dose_edges)
+                dose = p.dose_array(self.dose_name, self.dose_name)
+                target_mask = p.structure_mask(self.target_name, self.dose_name)
+                target_dose = np.mean(dose[target_mask])
 
-            if normalize:
-                dvh_pred.dose_edges /= target_dose
-                dvh_plan.dose_edges /= target_dose
+                dvh_pred = self.predict_structure(p, oar_name)
+                dvh_pred.dose_edges *= target_dose
+                dvh_plan = p.calculate_dvh(oar_name, self.dose_name,
+                    dose_edges=dvh_pred.dose_edges)
 
-            y_pred.append(dvh_pred.mean())
-            y_true.append(dvh_plan.mean())
+                if normalize:
+                    dvh_pred.dose_edges /= target_dose
+                    dvh_plan.dose_edges /= target_dose
+
+                y_pred.append(dvh_pred.mean())
+                y_true.append(dvh_plan.mean())
 
         r2 = r2_score(y_true, y_pred)
 

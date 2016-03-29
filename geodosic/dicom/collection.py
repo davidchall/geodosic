@@ -13,7 +13,7 @@ except ImportError:
 
 # project imports
 from geodosic.utils import lazy_property
-from geodosic.geometry import distance_to_surface
+from geodosic.geometry import distance_to_surface, interpolate_grids
 
 from geodosic.dicom.rtdose import DicomRtDose
 from geodosic.dicom.rtstruct import DicomRtStruct
@@ -153,12 +153,17 @@ class DicomCollection(object):
         else:
             return self.rtdose[index].grid_spacing()
 
-    def dose_array(self, name):
-        index = self._find_dose(name)
+    def dose_array(self, dose_name, grid_name):
+        index = self._find_dose(dose_name)
         if index is None:
             return None
         else:
-            return self.rtdose[index].dose_array()
+            dose = self.rtdose[index].dose_array()
+            if grid_name != dose_name:
+                orig_grid = self.grid_vectors(dose_name)
+                new_grid = self.grid_vectors(grid_name)
+                dose = interpolate_grids(dose, orig_grid, new_grid)
+            return dose
 
     def ct_grid_vectors(self):
         z_tot = np.array([])

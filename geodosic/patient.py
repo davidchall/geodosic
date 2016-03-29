@@ -76,6 +76,22 @@ def translate_struct(i):
     return translate_decorator
 
 
+def translate_dose(i):
+    def translate_decorator(func):
+        @wraps(func)
+        def func_wrapper(self, *args, **kwargs):
+            if i > len(args):
+                return func(self, *args, **kwargs)
+
+            args = list(args)
+            name = args[i-1]
+            name = self.dose_aliases.get(name, name)
+            args[i-1] = name
+            return func(self, *args, **kwargs)
+        return func_wrapper
+    return translate_decorator
+
+
 def translate_grid(i):
     def translate_decorator(func):
         @wraps(func)
@@ -91,22 +107,6 @@ def translate_grid(i):
                 name = name.lower()
             else:
                 name = self.dose_aliases.get(name, name)
-            args[i-1] = name
-            return func(self, *args, **kwargs)
-        return func_wrapper
-    return translate_decorator
-
-
-def translate_dose(i):
-    def translate_decorator(func):
-        @wraps(func)
-        def func_wrapper(self, *args, **kwargs):
-            if i > len(args):
-                return func(self, *args, **kwargs)
-
-            args = list(args)
-            name = args[i-1]
-            name = self.dose_aliases.get(name, name)
             args[i-1] = name
             return func(self, *args, **kwargs)
         return func_wrapper
@@ -163,18 +163,24 @@ class Patient(object):
 
     @translate_struct(1)
     @translate_grid(2)
-    @persistent_result('structure_mask', (1,2))
+    @persistent_result('structure_mask', (1, 2))
     def structure_mask(self, struct_name, grid_name):
         return self.dicom.structure_mask(struct_name, grid_name)
 
     @translate_struct(1)
     @translate_grid(2)
-    @persistent_result('distance', (1,2))
+    @persistent_result('distance', (1, 2))
     def distance_to_surface(self, struct_name, grid_name):
         mask = self.structure_mask(struct_name, grid_name)
         grid_spacing = self.dicom.grid_spacing(grid_name)
 
         return distance_to_surface(mask, grid_spacing).astype(np.float16)
+
+    @translate_dose(1)
+    @translate_grid(2)
+    @persistent_result('dose', (1, 2))
+    def dose_array(self, dose_name, grid_name):
+        return self.dicom.dose_array(dose_name, grid_name).astype(np.float32)
 
     @translate_grid(1)
     def grid_vectors(self, name):
@@ -184,16 +190,12 @@ class Patient(object):
     def grid_spacing(self, name):
         return self.dicom.grid_spacing(name)
 
-    @translate_dose(1)
-    def dose_array(self, name):
-        return self.dicom.dose_array(name)
-
     def ct_array(self):
         return self.dicom.ct_array()
 
     def calculate_dvh(self, struct_name, dose_name, struct_normalize=None,
                       dose_edges=None):
-        dose = self.dose_array(dose_name)
+        dose = self.dose_array(dose_name, dose_name)
         struct_mask = self.structure_mask(struct_name, dose_name)
 
         if struct_normalize:
@@ -212,7 +214,7 @@ class Patient(object):
 
     def calculate_dsh(self, struct_name, dose_name, struct_normalize=None,
                       dose_edges=None):
-        dose = self.dose_array(dose_name)
+        dose = self.dose_array(dose_name, dose_name)
         struct_mask = self.structure_mask(struct_name, dose_name)
         struct_surface = bwperim(struct_mask)
 
@@ -246,7 +248,7 @@ class Patient(object):
         return DVH.from_raw(struct_dist, dist_edges, skip_checks=True)
 
     def plot_dose_vs_distance(self, dose_name, struct_name, target_name):
-        dose = self.dose_array(dose_name)
+        dose = self.dose_array(dose_name, dose_name)
         dist = self.distance_to_surface(target_name, dose_name)
         struct_mask = self.structure_mask(struct_name, dose_name)
 
