@@ -77,8 +77,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             self.oar_names = [self.oar_names]
 
         self.pp = PdfPages(plot_fits) if plot_fits else None
-        if self.pp:
-            self.iPatient = 0
 
         # fit dose shells for all patients
         popt_all = []
@@ -89,7 +87,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         if self.pp:
             self.pp.close()
-            del self.pp, self.iPatient, self.iShell
+            del self.pp, self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell
 
         # what range of shell distances were covered?
         min_i = min(min(popt.keys()) for popt in popt_all)
@@ -171,7 +169,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             return
 
         if self.pp:
-            self.iPatient += 1
+            _, self.tmp_anon_id = os.path.split(p.dicom_dir)
+            self.tmp_oar_name = oar_name
 
         target_mask = p.structure_mask(self.target_name, self.grid_name)
         oar_mask = p.structure_mask(oar_name, self.grid_name)
@@ -196,7 +195,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 continue
 
             if self.pp:
-                self.iShell = i
+                self.tmp_i_shell = i
 
             popt[i] = self._fit_shell(dose_shell)
 
@@ -250,7 +249,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.plot(x, skew_normal_pdf(x, *popt), label='Fit')
             plt.xlabel('Dose / Target Dose')
             plt.legend(loc='best')
-            plt.title('Patient %i: Shell %i' % (self.iPatient, self.iShell))
+            plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
             self.pp.savefig()
             plt.clf()
 
