@@ -76,22 +76,32 @@ class DVH(object):
         y = self.dDVH if dDVH else self.cDVH
         plt.plot(x, y, *args, **kwargs)
 
-    def min(self):
+    def min(self, threshold=0):
         """Return the minimum dose.
 
         We don't have access to the exact value, so the lower edge of the
         first non-zero bin is returned.
+
+        Parameters:
+            threshold: the fractional volume used to determine the minimum,
+                which is useful for predicted DVHs where there are an infinite
+                number of "voxels".
         """
-        i = np.where(self.dDVH > 0)[0][0]
+        i = np.where(self.dDVH > threshold)[0][0]
         return self.dose_edges[i]
 
-    def max(self):
+    def max(self, threshold=0):
         """Return the maximum dose.
 
         We don't have access to the exact value, so the upper edge of the
         last non-zero bin is returned.
+
+        Parameters:
+            threshold: the fractional volume used to determine the maximum,
+                which is useful for predicted DVHs where there are an infinite
+                number of "voxels".
         """
-        i = np.where(self.dDVH > 0)[0][-1]
+        i = np.where(self.dDVH > threshold)[0][-1]
         return self.dose_edges[i+1]
 
     def mean(self):
@@ -162,7 +172,7 @@ class DVH(object):
             return self.max()
         elif a is -np.inf:
             return self.min()
-        elif a is 0:
+        elif a == 0:
             tmp = np.average(np.log(self.dose_centers), weights=self.dDVH)
             return np.exp(tmp)
         else:

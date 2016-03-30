@@ -362,7 +362,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_counts[-1] = 0
         return DVH(dose_counts, dose_edges, dDVH=True)
 
-    def score(self, X, y=None, normalize=False, plot=False, **kwargs):
+    def score(self, X, y=None,
+              metric_func='mean', metric_args=[], metric_label='metric',
+              normalize=False, plot=False, **kwargs):
+
         if isinstance(self.oar_names, str):
             self.oar_names = [self.oar_names]
 
@@ -387,8 +390,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                     dvh_pred.dose_edges /= target_dose
                     dvh_plan.dose_edges /= target_dose
 
-                y_pred.append(dvh_pred.mean())
-                y_true.append(dvh_plan.mean())
+                y_pred.append(getattr(dvh_pred, metric_func)(*metric_args))
+                y_true.append(getattr(dvh_plan, metric_func)(*metric_args))
 
         r2 = r2_score(y_true, y_pred)
 
@@ -396,9 +399,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.scatter(y_true, y_pred, c='k')
             max_val = 1.1*max(*y_true, *y_pred)
             plt.plot([0, max_val], [0, max_val], 'k:')
-            plt.xlabel('Planned metric')
-            plt.ylabel('Predicted metric')
-            plt.text(0.1*max_val, 0.9*max_val, 'R^2 = {0:.1%}'.format(r2))
+            plt.xlabel('Planned ' + metric_label)
+            plt.ylabel('Predicted ' + metric_label)
+            plt.text(0.1*max_val, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
             plt.axis('square')
             plt.axis([0, max_val, 0, max_val])
 
