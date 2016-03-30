@@ -3,6 +3,7 @@ import os
 import inspect
 from functools import wraps
 from math import ceil
+import logging
 
 # third-party imports
 import numpy as np
@@ -102,7 +103,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             popt_all_i = np.array([popt[i] for popt in popt_all if i in popt])
             if popt_all_i.size == 0:
-                raise RuntimeError('Uncovered shell: {0}'.format(i))
+                continue
 
             self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
             self.popt_std_[i] = np.std(popt_all_i, axis=0)
@@ -201,6 +202,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             popt[i] = self._fit_shell(dose_shell)
 
+        if len(popt) == 0:
+            popt = None
+
         return popt
 
     def _fit_shell(self, dose):
@@ -212,6 +216,18 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         Returns:
             popt: tuple of best-fit parameters
         """
+        # initial estimate and bounds of parameter values
+        p0 = [np.mean(dose), np.std(dose), ss.skew(dose)]
+        p_upper = [2, 1, 1000]
+        p_lower = [-1, 1e-9, -1000]
+        for i in range(len(p0)):
+            p0[i] = min(p0[i], p_upper[i])
+            p0[i] = max(p0[i], p_lower[i])
+
+        # if dose is uniform, there is no distribution to fit
+        if np.all(dose == dose[0]):
+            return p0
+
         # bin the data and add empty bins at either end to constrain fit
         min_bin_width = 1e-5
         max_n_bins = 100
@@ -234,15 +250,12 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
         # fit data
-        p0 = (np.mean(dose), np.std(dose), ss.skew(dose))
-        p_upper = (2, 1, 1000)
-        p_lower = (-1, 0, -1000)
-
         try:
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(p_lower, p_upper))
         except RuntimeError as e:
             # if convergence fails, just use initial parameters
+            logging.warning('Fit did not converge - using initial parameters')
             popt = p0
 
         if self.pp:
