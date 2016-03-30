@@ -11,6 +11,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import scipy.stats as ss
 from sklearn.base import BaseEstimator, RegressorMixin
 from scipy.optimize import curve_fit
+from scipy.interpolate import UnivariateSpline
 from sklearn.metrics import r2_score
 
 # project imports
@@ -113,11 +114,12 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             yp = zip(*(self.popt_avg_[i] for i in i_shell))
             dyp = zip(*(self.popt_std_[i] for i in i_shell))
             x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
-            xs = np.linspace(np.amin(x), np.amax(x), 100)
 
-            for param, (y, dy) in enumerate(zip(yp, dyp)):
+            xs = np.linspace(np.amin(x), np.amax(x), 100)
+            splines = self.interpolate_popt()
+
+            for param, (spline, y, dy) in enumerate(zip(splines, yp, dyp)):
                 plt.errorbar(x, y, dy, fmt='ko')
-                spline = fit_spline(x, y, dy)
                 plt.plot(xs, spline(xs))
                 plt.xlabel('Distance-to-target [mm]')
                 plt.ylabel('Average parameter')
@@ -255,6 +257,20 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         return popt
 
+    def interpolate_popt(self):
+        i_shell = np.array(sorted(list(self.popt_avg_.keys())))
+        yp = zip(*(self.popt_avg_[i] for i in i_shell if i in self.popt_avg_))
+        dyp = zip(*(self.popt_std_[i] for i in i_shell if i in self.popt_std_))
+        x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
+
+        splines = []
+        for y, dy in zip(yp, dyp):
+            dy = np.clip(dy, 1e-6*np.mean(dy), np.amax(dy))
+            weights = np.power(dy, -2)
+            splines.append(UnivariateSpline(x, y, w=weights, s=0.9))
+
+        return splines
+
     def predict(self, X, *args, **kwargs):
         if isinstance(self.oar_names, str):
             self.oar_names = [self.oar_names]
@@ -286,14 +302,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         oar_size = dist_oar.size
         if oar_size <= max_size_voxelwise:
-            i_shell = np.array(sorted(list(self.popt_avg_.keys())))
-            yp = zip(*(self.popt_avg_[i] for i in i_shell if i in self.popt_avg_))
-            dyp = zip(*(self.popt_std_[i] for i in i_shell if i in self.popt_std_))
-            x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
 
-            splines = []
-            for param, (y, dy) in enumerate(zip(yp, dyp)):
-                splines.append(fit_spline(x, y, dy))
+            popt_splines = self.interpolate_popt()
 
             for dist_voxel in dist_oar:
                 if dist_voxel < np.amin(x):
@@ -301,7 +311,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 elif dist_voxel > np.amax(x):
                     popt = self.popt_avg_[max_fitted_i]
                 else:
-                    popt = [spline(dist_voxel) for spline in splines]
+                    popt = [spline(dist_voxel) for spline in popt_splines]
 
                 if np.all(popt == 0):
                     continue
@@ -323,7 +333,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 elif i > max_fitted_i:
                     popt = self.popt_avg_[max_fitted_i]
                 elif i not in self.popt_avg_:
-                    popt = self.popt_avg_[i-1]
+                    dist = 0.5 * (inner + outer)
+                    popt_splines = self.interpolate_popt()
+                    popt = [spline(dist) for spline in popt_splines]
                 else:
                     popt = self.popt_avg_[i]
 
@@ -378,12 +390,3 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.axis([0, max_val, 0, max_val])
 
         return r2
-
-
-def fit_spline(x, y, dy):
-    from scipy.interpolate import UnivariateSpline
-    dy = np.clip(dy, 1e-6*np.mean(dy), np.amax(dy))
-    weights = np.power(dy, -2)
-    spline = UnivariateSpline(x, y, w=weights, s=0.9)
-
-    return spline
