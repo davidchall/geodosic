@@ -337,7 +337,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         dose_counts[-1] = 0
         return DVH(dose_counts, dose_edges, dDVH=True)
 
-    def score(self, X, y=None, normalize=False, plot=False):
+    def score(self, X, y=None, normalize=False, plot=False, **kwargs):
         if isinstance(self.oar_names, str):
             self.oar_names = [self.oar_names]
 
@@ -353,7 +353,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 target_mask = p.structure_mask(self.target_name, self.dose_name)
                 target_dose = np.mean(dose[target_mask])
 
-                dvh_pred = self.predict_structure(p, oar_name)
+                dvh_pred = self.predict_structure(p, oar_name, **kwargs)
                 dvh_pred.dose_edges *= target_dose
                 dvh_plan = p.calculate_dvh(oar_name, self.dose_name,
                     dose_edges=dvh_pred.dose_edges)
