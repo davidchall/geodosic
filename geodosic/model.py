@@ -326,6 +326,12 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 else:
                     popt = [spline(dist_voxel) for spline in popt_splines]
 
+                p_upper = [2, 1, 1000]
+                p_lower = [-1, 1e-9, -1000]
+                for i in range(len(popt)):
+                    popt[i] = min(popt[i], p_upper[i])
+                    popt[i] = max(popt[i], p_lower[i])
+
                 if np.all(popt == 0):
                     continue
                 else:
