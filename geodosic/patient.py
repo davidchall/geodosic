@@ -171,6 +171,10 @@ class Patient(object):
     @translate_grid(2)
     @persistent_result('distance', (1, 2))
     def distance_to_surface(self, struct_name, grid_name):
+        x, y, z = self.dicom.grid_vectors(grid_name)
+        if not np.all(np.diff(np.diff(z)) == 0):
+            raise ValueError('Attempted to use non-regular grid to compute distance-to-surface')
+
         mask = self.structure_mask(struct_name, grid_name)
         grid_spacing = self.dicom.grid_spacing(grid_name)
 
