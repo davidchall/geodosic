@@ -19,6 +19,15 @@ from sklearn.metrics import r2_score
 from .geometry import distance_to_surface, bin_distance, interpolate_grids
 from .dvh import DVH
 
+# update plotting style
+from matplotlib.pylab import rcParams
+params = {
+    'figure.figsize': (10.0, 8.0),
+    'font.size': 20,
+    'legend.fontsize': 20,
+}
+rcParams.update(params)
+
 
 def skew_normal_pdf(x, e=0, w=1, a=0):
     """PDF for skew-normal distribution.
@@ -123,8 +132,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 plt.errorbar(x, y, dy, fmt='ko')
                 plt.plot(xs, spline(xs))
                 plt.xlabel('Distance-to-target [mm]')
-                plt.ylabel('Average parameter')
-                plt.title('Parameter %i' % (param+1))
+                plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
 
                 self.pp.savefig()
                 plt.clf()
@@ -136,8 +144,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                     x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
                     plt.plot(x, y, 'o', markeredgewidth=0.0)
                     plt.xlabel('Distance-to-target [mm]')
-                    plt.ylabel('Best-fit parameter')
-                    plt.title('Parameter %i' % (param+1))
+                    plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
 
                 self.pp.savefig()
                 plt.clf()
@@ -270,15 +277,17 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt = p0
 
         if self.pp:
-            plt.plot(bin_centers, counts, 'k', drawstyle='steps-mid', label='Data')
+            plt.plot(bin_centers, counts, 'k', drawstyle='steps-mid', label='Plan data')
             x = np.linspace(0, 1.1*np.amax(bin_centers), 200)
             plt.plot(x, skew_normal_pdf(x, *popt), 'r', label='Fit')
+            plt.tick_params(labelleft='off')
             plt.xlabel('Normalized dose')
-            plt.ylabel('Probability density')
+            plt.ylabel('Normalized volume')
             plt.legend(loc='upper left')
-            s = '\n'.join('$\\theta_{{{0}}}$ = {1:.2f}'.format(i+1, phat) for i, phat in enumerate(popt))
-            plt.figtext(0.16, 0.6, s)
             plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
+            s = 'k = {0}\n\n'.format(self.tmp_i_shell)
+            s += '\n'.join('$\\theta_{{{0}}}$= {1:.2f}'.format(i+1, phat) for i, phat in enumerate(popt))
+            plt.figtext(0.16, 0.55, s, size=20)
             self.pp.savefig()
             plt.clf()
 
