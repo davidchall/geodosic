@@ -192,7 +192,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         # make 2D histogram
         if self.pp:
             dose_edges = np.linspace(0, 1.1, 55, True)
-            plt.hist2d(dist_oar, dose_oar, bins=(dist_edges[1:-1], dose_edges))
+            tmp_dist_edges = np.hstack([dist_edges[1]-self.shell_width, dist_edges[1:-1], dist_edges[-2]+self.shell_width])
+            plt.hist2d(dist_oar, dose_oar, bins=(tmp_dist_edges, dose_edges))
             plt.xlabel('Distance-to-target [mm]')
             plt.ylabel('Normalized dose')
             plt.title('%s, %s' % (self.tmp_anon_id, self.tmp_oar_name))
@@ -275,7 +276,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.xlabel('Normalized dose')
             plt.ylabel('Probability density')
             plt.legend(loc='upper left')
-            s = '\n'.join('$\\theta_{{{0}}}$ = {1:.2f}'.format(i, phat) for i, phat in enumerate(popt))
+            s = '\n'.join('$\\theta_{{{0}}}$ = {1:.2f}'.format(i+1, phat) for i, phat in enumerate(popt))
             plt.figtext(0.16, 0.6, s)
             plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
             self.pp.savefig()

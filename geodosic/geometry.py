@@ -48,6 +48,8 @@ def distance_to_surface(mask, grid_spacing=(1, 1, 1)):
 def bin_distance(min_dist, max_dist, width):
 
     dist_edges = np.arange(0., max_dist, width)
+    if dist_edges.size == 0:
+        dist_edges = np.array([0])
     dist_edges = np.append(dist_edges, np.inf)
     i_shell = np.arange(1, dist_edges.size)
 
