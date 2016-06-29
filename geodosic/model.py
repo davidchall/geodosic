@@ -229,8 +229,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         """
         # initial estimate and bounds of parameter values
         p0 = [np.mean(dose), np.std(dose), ss.skew(dose)]
-        p_upper = [2, 1, 1000]
-        p_lower = [-1, 1e-9, -1000]
+        p_upper = [2, 1, 10]
+        p_lower = [-1, 1e-9, -10]
         for i in range(len(p0)):
             p0[i] = min(p0[i], p_upper[i])
             p0[i] = max(p0[i], p_lower[i])
@@ -342,8 +342,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 else:
                     popt = [spline(dist_voxel) for spline in popt_splines]
 
-                p_upper = [2, 1, 1000]
-                p_lower = [-1, 1e-9, -1000]
+                p_upper = [2, 1, 10]
+                p_lower = [-1, 1e-9, -10]
                 for i in range(len(popt)):
                     popt[i] = min(popt[i], p_upper[i])
                     popt[i] = max(popt[i], p_lower[i])
