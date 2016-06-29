@@ -189,6 +189,16 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         max_dist = np.amax(dist_oar)
         i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
+        # make 2D histogram
+        if self.pp:
+            dose_edges = np.linspace(0, 1.1, 55, True)
+            plt.hist2d(dist_oar, dose_oar, bins=(dist_edges[1:-1], dose_edges))
+            plt.xlabel('Distance-to-target [mm]')
+            plt.ylabel('Normalized dose')
+            plt.title('%s, %s' % (self.tmp_anon_id, self.tmp_oar_name))
+            self.pp.savefig()
+            plt.clf()
+
         popt = {}
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
 
@@ -240,7 +250,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             bin_width = max(bin_width, min_bin_width)
             n_bins = ceil((max_dose-min_dose) / bin_width)
             n_bins = min(n_bins, max_n_bins-2)
-            bin_edges = np.linspace(min_dose, max_dose, n_bins+1)
+            bin_edges = np.linspace(min_dose, max_dose+np.finfo(float).eps, n_bins+1)
 
         # add empty bins at either end to further constrain fit
         bin_edges = np.insert(bin_edges, 0, 2*bin_edges[0]-bin_edges[1])
@@ -259,11 +269,14 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             popt = p0
 
         if self.pp:
-            plt.plot(bin_centers, counts, drawstyle='steps-mid', label='Data')
-            x = np.linspace(np.amin(bin_centers), np.amax(bin_centers), 100)
-            plt.plot(x, skew_normal_pdf(x, *popt), label='Fit')
-            plt.xlabel('Dose / Target Dose')
-            plt.legend(loc='best')
+            plt.plot(bin_centers, counts, 'k', drawstyle='steps-mid', label='Data')
+            x = np.linspace(0, 1.1*np.amax(bin_centers), 200)
+            plt.plot(x, skew_normal_pdf(x, *popt), 'r', label='Fit')
+            plt.xlabel('Normalized dose')
+            plt.ylabel('Probability density')
+            plt.legend(loc='upper left')
+            s = '\n'.join('$\\theta_{{{0}}}$ = {1:.2f}'.format(i, phat) for i, phat in enumerate(popt))
+            plt.figtext(0.16, 0.6, s)
             plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
             self.pp.savefig()
             plt.clf()
