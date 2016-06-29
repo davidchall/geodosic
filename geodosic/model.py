@@ -292,9 +292,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         splines = []
         for y, dy in zip(yp, dyp):
-            dy = np.clip(dy, 1e-6*np.mean(dy), np.amax(dy))
+            dy = np.clip(dy, 0.1*np.mean(dy), np.amax(dy))
             weights = np.power(dy, -2)
-            splines.append(UnivariateSpline(x, y, w=weights, s=0.9))
+            splines.append(UnivariateSpline(x, y, w=weights, s=0.8))
 
         return splines
 
