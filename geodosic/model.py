@@ -331,11 +331,13 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         if oar_size <= max_size_voxelwise:
 
             popt_splines = self.interpolate_popt()
+            min_fitted_dist = min_fitted_i * self.shell_width
+            max_fitted_dist = max_fitted_i * self.shell_width
 
             for dist_voxel in dist_oar:
-                if dist_voxel < min_dist:
+                if dist_voxel < min_fitted_dist:
                     popt = self.popt_avg_[min_fitted_i]
-                elif dist_voxel > max_dist:
+                elif dist_voxel > max_fitted_dist:
                     popt = self.popt_avg_[max_fitted_i]
                 else:
                     popt = [spline(dist_voxel) for spline in popt_splines]
