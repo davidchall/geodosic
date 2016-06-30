@@ -91,6 +91,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         self.pp = PdfPages(plot_fits) if plot_fits else None
 
+        # parameter bounds
+        self.p_upper = [2, 1, 10]
+        self.p_lower = [-1, 1e-9, -10]
+
         # fit dose shells for all patients
         popt_all = []
         for p in X:
@@ -241,11 +245,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         """
         # initial estimate and bounds of parameter values
         p0 = [np.mean(dose), np.std(dose), ss.skew(dose)]
-        p_upper = [2, 1, 10]
-        p_lower = [-1, 1e-9, -10]
         for i in range(len(p0)):
-            p0[i] = min(p0[i], p_upper[i])
-            p0[i] = max(p0[i], p_lower[i])
+            p0[i] = min(p0[i], self.p_upper[i])
+            p0[i] = max(p0[i], self.p_lower[i])
 
         # if dose is uniform, there is no distribution to fit
         if np.all(dose == dose[0]):
@@ -275,7 +277,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         # fit data
         try:
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
-                                   p0=p0, bounds=(p_lower, p_upper))
+                                   p0=p0, bounds=(self.p_lower, self.p_upper))
         except RuntimeError as e:
             # if convergence fails, just use initial parameters
             logging.warning('Fit did not converge - using initial parameters')
@@ -356,11 +358,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 else:
                     popt = [spline(dist_voxel) for spline in popt_splines]
 
-                p_upper = [2, 1, 10]
-                p_lower = [-1, 1e-9, -10]
                 for i in range(len(popt)):
-                    popt[i] = min(popt[i], p_upper[i])
-                    popt[i] = max(popt[i], p_lower[i])
+                    popt[i] = min(popt[i], self.p_upper[i])
+                    popt[i] = max(popt[i], self.p_lower[i])
 
                 if np.all(popt == 0):
                     continue
