@@ -202,12 +202,11 @@ class Patient(object):
                       dose_edges=None):
         dose = self.dose_array(dose_name, dose_name)
         struct_mask = self.structure_mask(struct_name, dose_name)
+        struct_dose = dose[struct_mask]
 
         if struct_normalize:
             norm_mask = self.structure_mask(struct_normalize, dose_name)
-            dose /= np.mean(dose[norm_mask])
-
-        struct_dose = dose[struct_mask]
+            struct_dose /= np.mean(dose[norm_mask])
 
         if dose_edges is None:
             eps = np.finfo(float).eps

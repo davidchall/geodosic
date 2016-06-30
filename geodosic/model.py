@@ -343,7 +343,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 pred.append(self.predict_structure(p, oar_name, *args, **kwargs))
         return pred
 
-    def predict_structure(self, p, oar_name, max_size_voxelwise=1000):
+    def predict_structure(self, p, oar_name, dose_edges=None,
+                          max_size_voxelwise=1000):
         if oar_name not in p.structure_names:
             return
         if self.target_name not in p.structure_names:
@@ -358,7 +359,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         min_dist = np.amin(dist_oar)
         max_dist = np.amax(dist_oar)
 
-        dose_edges = np.linspace(0., 1.2, 120)
+        if dose_edges is None:
+            dose_edges = np.linspace(0., 1.2, 120)
         dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
         dose_counts = np.zeros_like(dose_centers)
 
@@ -434,16 +436,21 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
                 dose = p.dose_array(self.dose_name, self.dose_name)
                 target_mask = p.structure_mask(self.target_name, self.dose_name)
-                target_dose = np.mean(dose[target_mask])
+                norm_factor = np.mean(dose[target_mask])
 
-                dvh_pred = self.predict_structure(p, oar_name, **kwargs)
-                dvh_pred.dose_edges *= target_dose
-                dvh_plan = p.calculate_dvh(oar_name, self.dose_name,
-                    dose_edges=dvh_pred.dose_edges)
+                # choose appropriate binning for DVHs
+                oar_mask = p.structure_mask(oar_name, self.dose_name)
+                max_oar_dose = np.amax(dose[oar_mask]) / norm_factor
+                max_dvh_dose = max(1.05*max_oar_dose, 1.2)
+                dose_edges = np.linspace(0, max_dvh_dose, 200)
+
+                dvh_plan = p.calculate_dvh(oar_name, self.dose_name, dose_edges=dose_edges*norm_factor)
+                dvh_pred = self.predict_structure(p, oar_name, dose_edges=dose_edges, **kwargs)
 
                 if normalize:
-                    dvh_pred.dose_edges /= target_dose
-                    dvh_plan.dose_edges /= target_dose
+                    dvh_plan.dose_edges /= norm_factor
+                else:
+                    dvh_pred.dose_edges *= norm_factor
 
                 y_pred.append(getattr(dvh_pred, metric_func)(*metric_args))
                 y_true.append(getattr(dvh_plan, metric_func)(*metric_args))
