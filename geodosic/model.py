@@ -28,6 +28,9 @@ params = {
 }
 rcParams.update(params)
 
+# logger config
+logging.basicConfig(format='%(levelname)s: %(message)s')
+
 
 def skew_normal_pdf(x, e=0, w=1, a=0):
     """PDF for skew-normal distribution.
@@ -96,11 +99,18 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         self.p_lower = [-1, 1e-9, -10]
 
         # fit dose shells for all patients
+        self.failed_converge = 0
+        self.attempt_converge = 0
         popt_all = []
         for p in X:
             for oar_name in self.oar_names:
                 popt_all.append(self._fit_structure(p, oar_name))
         popt_all = [popt for popt in popt_all if popt is not None]
+
+        if self.failed_converge > 0:
+            logging.warning('{0}/{1} fits failed to converge (instead used mean, std, skew)'.format(self.failed_converge, self.attempt_converge))
+        del self.attempt_converge
+        del self.failed_converge
 
         if self.pp:
             self.pp.close()
@@ -274,13 +284,15 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         counts, bin_edges = np.histogram(dose, bin_edges, density=True)
         bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
+        self.attempt_converge += 1
+
         # fit data
         try:
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(self.p_lower, self.p_upper))
         except RuntimeError as e:
             # if convergence fails, just use initial parameters
-            logging.warning('Fit did not converge - using initial parameters')
+            self.failed_converge += 1
             popt = p0
 
         if self.pp:
