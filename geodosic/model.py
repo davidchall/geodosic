@@ -144,12 +144,19 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             dyp = zip(*(self.popt_std_[i] for i in i_shell))
             x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
 
-            xs = np.linspace(np.amin(x), np.amax(x), 100)
-            splines = self.interpolate_popt()
+            min_xs = self.shell_width*(min_i-1) if min_i > 0 else self.shell_width*min_i
+            max_xs = self.shell_width*max_i if max_i > 0 else self.shell_width*(max_i+1)
+            xs = np.linspace(min_xs, max_xs, 100)
 
+            splines = self.interpolate_popt()
             for param, (spline, y, dy) in enumerate(zip(splines, yp, dyp)):
+
+                ys = np.clip(spline(xs), self.p_lower[param], self.p_upper[param])
+                ys[xs < np.amin(x)] = spline(np.amin(x))
+                ys[xs > np.amax(x)] = spline(np.amax(x))
+
                 plt.errorbar(x, y, dy, fmt='ko')
-                plt.plot(xs, spline(xs))
+                plt.plot(xs, ys)
                 plt.xlabel('Distance-to-target [mm]')
                 plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
 
@@ -303,10 +310,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.xlabel('Normalized dose')
             plt.ylabel('Normalized volume')
             plt.legend(loc='upper left')
-            plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
             s = 'k = {0}\n\n'.format(self.tmp_i_shell)
             s += '\n'.join('$\\theta_{{{0}}}$= {1:.2f}'.format(i+1, phat) for i, phat in enumerate(popt))
             plt.figtext(0.16, 0.55, s, size=20)
+            plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
             self.pp.savefig()
             plt.clf()
 
