@@ -64,7 +64,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
-                 grid_name=None, shell_width=3.0, min_shell_size_fit=10):
+                 grid_name=None, shell_width=3.0,
+                 min_shell_size_fit=10, min_structures_for_fit=2):
         pass
 
     def fit(self, X, y=None, plot_fits=None, plot_params=None):
@@ -80,6 +81,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         assert self.target_name is not None
         assert self.shell_width > 0
         assert self.min_shell_size_fit > 0
+        assert self.min_structures_for_fit > 0
 
         if self.grid_name is None:
             self.grid_name = self.dose_name
@@ -112,6 +114,9 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
             popt_all_i = np.array([popt[i] for popt in popt_all if i in popt])
             if popt_all_i.size == 0:
+                continue
+
+            if popt_all_i.shape[0] < self.min_structures_for_fit:
                 continue
 
             self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
