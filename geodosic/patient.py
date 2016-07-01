@@ -210,7 +210,7 @@ class Patient(object):
 
         if dose_edges is None:
             eps = np.finfo(float).eps
-            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(struct_dose),
+            dose_edges, binwidth = np.linspace(0, np.amax(struct_dose)+eps,
                                                200, retstep=True)
             dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
 
@@ -230,7 +230,7 @@ class Patient(object):
 
         if dose_edges is None:
             eps = np.finfo(float).eps
-            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(surface_dose),
+            dose_edges, binwidth = np.linspace(0, np.amax(surface_dose)+eps,
                                                200, retstep=True)
             dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
 
@@ -244,8 +244,8 @@ class Patient(object):
 
         if dist_edges is None:
             eps = np.finfo(float).eps
-            dist_edges, binwidth = np.linspace((1-eps)*np.amin(struct_dist),
-                                               (1+eps)*np.amax(struct_dist),
+            dist_edges, binwidth = np.linspace(np.amin(struct_dist)-eps,
+                                               np.amax(struct_dist)+eps,
                                                200, retstep=True)
             dist_edges = np.append(dist_edges, (dist_edges[-1] + binwidth))
 

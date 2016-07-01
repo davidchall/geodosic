@@ -48,7 +48,8 @@ class DVH(object):
 
     @cDVH.setter
     def cDVH(self, volumes):
-        volumes = volumes / np.amax(volumes)
+        if np.amax(volumes) != 0:
+            volumes = volumes / np.amax(volumes)
         self._cDVH = volumes
         self._dDVH = np.append(np.diff(volumes[::-1])[::-1], volumes[-1])
 
@@ -74,7 +75,7 @@ class DVH(object):
         """
         x = self.dose_centers
         y = self.dDVH if dDVH else self.cDVH
-        plt.plot(x, y, *args, **kwargs)
+        return plt.plot(x, y, *args, **kwargs)
 
     def min(self, threshold=0):
         """Return the minimum dose.

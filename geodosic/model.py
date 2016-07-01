@@ -19,18 +19,6 @@ from sklearn.metrics import r2_score
 from .geometry import distance_to_surface, bin_distance, interpolate_grids
 from .dvh import DVH
 
-# update plotting style
-from matplotlib.pylab import rcParams
-params = {
-    'figure.figsize': (10.0, 8.0),
-    'font.size': 20,
-    'legend.fontsize': 20,
-}
-rcParams.update(params)
-
-# logger config
-logging.basicConfig(format='%(levelname)s: %(message)s')
-
 
 def skew_normal_pdf(x, e=0, w=1, a=0):
     """PDF for skew-normal distribution.
@@ -463,7 +451,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.plot([0, max_val], [0, max_val], 'k:')
             plt.xlabel('Planned ' + metric_label)
             plt.ylabel('Predicted ' + metric_label)
-            plt.text(0.1*max_val, 0.9*max_val, 'R2 = {0:.1%}'.format(r2))
+            plt.figtext(0.23, 0.8, '$R^2$ = {0:.1%}'.format(r2))
             plt.axis('square')
             plt.axis([0, max_val, 0, max_val])
 
