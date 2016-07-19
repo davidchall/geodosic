@@ -59,7 +59,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                  min_shell_size_fit=10, min_structures_for_fit=2):
         pass
 
-    def fit(self, X, y=None, plot_fits=None, plot_params=None):
+    def fit(self, X, y=None, plot_shell_func=None, plot_structure_func=None, return_popt_all=False):
         """Train the model.
 
         Parameters:
@@ -80,7 +80,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         if isinstance(self.oar_names, str):
             self.oar_names = [self.oar_names]
 
-        self.pp = PdfPages(plot_fits) if plot_fits else None
+        self.plot_shell_func = plot_shell_func
+        self.plot_structure_func = plot_structure_func
 
         # parameter bounds
         self.p_upper = [2, 1, 10]
@@ -99,10 +100,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             logging.warning('{0}/{1} fits failed to converge (instead used mean, std, skew)'.format(self.failed_converge, self.attempt_converge))
         del self.attempt_converge
         del self.failed_converge
-
-        if self.pp:
-            self.pp.close()
-            del self.pp, self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell
 
         # what range of shell distances were covered?
         min_i = min(min(popt.keys()) for popt in popt_all)
@@ -124,47 +121,14 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
             self.popt_std_[i] = np.std(popt_all_i, axis=0)
 
-        if plot_params:
-            self.pp = PdfPages(plot_params)
+        if return_popt_all:
+            return popt_all
+        else:
+            return self
 
-            i_shell = np.array(sorted(list(self.popt_avg_.keys())))
-            yp = zip(*(self.popt_avg_[i] for i in i_shell))
-            dyp = zip(*(self.popt_std_[i] for i in i_shell))
-            x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
-
-            min_xs = self.shell_width*(min_i-1) if min_i > 0 else self.shell_width*min_i
-            max_xs = self.shell_width*max_i if max_i > 0 else self.shell_width*(max_i+1)
-            xs = np.linspace(min_xs, max_xs, 100)
-
-            splines = self.interpolate_popt()
-            for param, (spline, y, dy) in enumerate(zip(splines, yp, dyp)):
-
-                ys = np.clip(spline(xs), self.p_lower[param], self.p_upper[param])
-                ys[xs < np.amin(x)] = spline(np.amin(x))
-                ys[xs > np.amax(x)] = spline(np.amax(x))
-
-                plt.errorbar(x, y, dy, fmt='ko')
-                plt.plot(xs, ys)
-                plt.xlabel('Distance-to-target [mm]')
-                plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
-
-                self.pp.savefig()
-                plt.clf()
-
-            for param in range(len(next(iter(self.popt_avg_.values())))):
-                for popt in popt_all:
-                    i_shell = np.array(sorted(list(popt.keys())))
-                    y = np.array([popt[i][param] for i in i_shell])
-                    x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
-                    plt.plot(x, y, 'o', markeredgewidth=0.0)
-                    plt.xlabel('Distance-to-target [mm]')
-                    plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
-
-                self.pp.savefig()
-                plt.clf()
-
-            self.pp.close()
-            del self.pp
+        del self.plot_shell_func
+        del self.plot_structure_func
+        del self.tmp_i_shell, self.tmp_anon_id, self.tmp_oar_name
 
         return self
 
@@ -192,9 +156,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             logging.error('Could not find "%s" in %s' % (self.target_name, p.dicom_dir))
             return
 
-        if self.pp:
-            _, self.tmp_anon_id = os.path.split(p.dicom_dir)
-            self.tmp_oar_name = oar_name
+        _, self.tmp_anon_id = os.path.split(p.dicom_dir)
+        self.tmp_oar_name = oar_name
 
         target_mask = p.structure_mask(self.target_name, self.grid_name)
         oar_mask = p.structure_mask(oar_name, self.grid_name)
@@ -210,16 +173,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         max_dist = np.amax(dist_oar)
         i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
 
-        # make 2D histogram
-        if self.pp:
-            dose_edges = np.linspace(0, 1.1, 55, True)
-            tmp_dist_edges = np.hstack([dist_edges[1]-self.shell_width, dist_edges[1:-1], dist_edges[-2]+self.shell_width])
-            plt.hist2d(dist_oar, dose_oar, bins=(tmp_dist_edges, dose_edges))
-            plt.xlabel('Distance-to-target [mm]')
-            plt.ylabel('Normalized dose')
-            plt.title('%s, %s' % (self.tmp_anon_id, self.tmp_oar_name))
-            self.pp.savefig()
-            plt.clf()
+        if self.plot_structure_func:
+            self.plot_structure_func(self, dose_oar, dist_oar)
 
         popt = {}
         for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
@@ -229,8 +184,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             if dose_shell.size < self.min_shell_size_fit:
                 continue
 
-            if self.pp:
-                self.tmp_i_shell = i
+            self.tmp_i_shell = i
 
             popt[i] = self._fit_shell(dose_shell)
 
@@ -290,20 +244,8 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             self.failed_converge += 1
             popt = p0
 
-        if self.pp:
-            plt.plot(bin_centers, counts, 'k', drawstyle='steps-mid', label='Plan data')
-            x = np.linspace(0, 1.1*np.amax(bin_centers), 200)
-            plt.plot(x, skew_normal_pdf(x, *popt), 'r', label='Fit')
-            plt.tick_params(labelleft='off')
-            plt.xlabel('Normalized dose')
-            plt.ylabel('Normalized volume')
-            plt.legend(loc='upper left')
-            s = 'k = {0}\n\n'.format(self.tmp_i_shell)
-            s += '\n'.join('$\\theta_{{{0}}}$= {1:.2f}'.format(i+1, phat) for i, phat in enumerate(popt))
-            plt.figtext(0.16, 0.55, s, size=20)
-            plt.title('%s, %s, Shell %i' % (self.tmp_anon_id, self.tmp_oar_name, self.tmp_i_shell))
-            self.pp.savefig()
-            plt.clf()
+        if self.plot_shell_func:
+            self.plot_shell_func(self, bin_centers, counts, popt)
 
         return popt
 
