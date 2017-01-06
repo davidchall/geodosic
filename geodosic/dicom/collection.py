@@ -65,7 +65,7 @@ class DicomCollection(object):
             ds = pydicom_read_file(fname, defer_size=100, force=True)
 
             if 'SOPClassUID' not in ds:
-                logging.debug('Not a valid DICOM file: %s' % fname)
+                logging.warning('Not a valid DICOM file: %s' % fname)
                 continue
 
             if ds.SOPClassUID == RTDOSE_UID:
@@ -77,7 +77,7 @@ class DicomCollection(object):
             elif ds.SOPClassUID == CT_UID:
                 self.ct.append(DicomCt(ds))
             else:
-                logging.warning('Unsupported DICOM SOP class: %s' % fname)
+                logging.debug('Unsupported DICOM SOP class: %s' % fname)
 
         # sort CT files by z value
         self.ct = sorted(self.ct, key=lambda x: x.grid_vectors()[2])
