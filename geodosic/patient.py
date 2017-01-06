@@ -133,15 +133,17 @@ class Patient(object):
             raise ValueError('Input DICOM directory not found %s' % dicom_dir)
         self.dicom_dir = dicom_dir
 
+        self.structure_aliases = {}
+        self.dose_aliases = {}
+
         config_fname = os.path.join(dicom_dir, 'config.json')
         if os.path.isfile(config_fname):
             with open(config_fname, 'r') as f:
                 config = json.load(f)
-            self.structure_aliases = config['structure_aliases']
-            self.dose_aliases = config['dose_aliases']
-        else:
-            self.structure_aliases = {}
-            self.dose_aliases = {}
+            if 'structure_aliases' in config:
+                self.structure_aliases = config['structure_aliases']
+            if 'dose_aliases' in config:
+                self.dose_aliases = config['dose_aliases']
 
         result_fname = os.path.join(dicom_dir, 'intermediate-results.hdf5')
         self.results = h5py.File(result_fname, 'a')
