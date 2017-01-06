@@ -65,7 +65,7 @@ class DicomCollection(object):
             ds = pydicom_read_file(fname, defer_size=100, force=True)
 
             if 'SOPClassUID' not in ds:
-                logging.warning('Not a valid DICOM file: %s' % fname)
+                logging.debug('Not a valid DICOM file: %s' % fname)
                 continue
 
             if ds.SOPClassUID == RTDOSE_UID:
