@@ -244,6 +244,15 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             self.failed_converge += 1
             popt = p0
 
+        except Exception as e:
+            print(dose.size)
+            print(bin_edges.size)
+            print(counts.size)
+            print(dose)
+            print(bin_edges)
+            print(counts)
+            raise e
+
         if self.plot_shell_func:
             self.plot_shell_func(self, bin_centers, counts, popt)
 
