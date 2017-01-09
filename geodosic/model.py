@@ -13,6 +13,7 @@ import scipy.stats as ss
 from sklearn.base import BaseEstimator, RegressorMixin
 from scipy.optimize import curve_fit
 from scipy.interpolate import UnivariateSpline
+from scipy.integrate import quad
 from sklearn.metrics import r2_score
 
 # project imports
@@ -90,7 +91,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
 
         # parameter bounds
         self.p_upper = [2, 1, 10]
-        self.p_lower = [-1, 1e-9, -10]
+        self.p_lower = [0, 1e-9, -10]
         if not self.normalize_dose_to_target:
             self.p_upper[0] *= self.max_prescribed_dose
             self.p_lower[0] *= self.max_prescribed_dose
@@ -294,7 +295,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return pred
 
     def predict_structure(self, p, oar_name, dose_edges=None,
-                          max_size_voxelwise=1000):
+                          max_size_voxelwise=1000, vol_tol=1e-2):
         if oar_name not in p.structure_names:
             return
         if self.target_name not in p.structure_names:
@@ -304,6 +305,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         max_fitted_i = max(self.popt_avg_.keys())
 
         oar_mask = p.structure_mask(oar_name, self.grid_name)
+        n_voxels_oar = np.count_nonzero(oar_mask)
         dist = p.distance_to_surface(self.target_name, self.grid_name)
         dist_oar = dist[oar_mask]
         min_dist = np.amin(dist_oar)
@@ -314,8 +316,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             if not self.normalize_dose_to_target:
                 dose_edges *= self.max_prescribed_dose
 
-        dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
-        dose_counts = np.zeros_like(dose_centers)
+        dose_struct = np.zeros_like(dose_edges[:-1])
 
         oar_size = dist_oar.size
         if oar_size <= max_size_voxelwise:
@@ -336,10 +337,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                     popt[i] = min(popt[i], self.p_upper[i])
                     popt[i] = max(popt[i], self.p_lower[i])
 
-                if np.all(popt == 0):
-                    continue
-                else:
-                    dose_counts += skew_normal_pdf(dose_centers, *popt)
+                dose_struct += self.predict_subvolume(tuple(popt), dose_edges, vol_tol)
 
         else:
             i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
@@ -362,15 +360,41 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
                 else:
                     popt = self.popt_avg_[i]
 
-                if np.all(popt == 0):
-                    continue
-                else:
-                    dose_shell = skew_normal_pdf(dose_centers, *popt)
-                    dose_counts += n_voxels_shell * dose_shell
+                dose_struct += n_voxels_shell * self.predict_subvolume(tuple(popt), dose_edges, vol_tol)
 
         # parametric fits yield long tails, but DVH requires last bin is zero
-        dose_counts[-1] = 0
-        return DVH(dose_counts, dose_edges, dDVH=True)
+        if dose_struct[-1] > 0:
+            overflow_volume = dose_struct[-1] / n_voxels_oar
+            if overflow_volume > vol_tol:
+                logging.warning('Predicted dose exceeds DVH domain ({0:.1%} of volume)'.format(overflow_volume))
+            dose_struct[-2] += dose_struct[-1]
+            dose_struct[-1] = 0
+
+        return DVH(dose_struct, dose_edges, dDVH=True)
+
+    def predict_subvolume(self, popt, dose_edges, vol_tol):
+        dose_subvol = np.zeros_like(dose_edges[:-1])
+
+        if popt[0] < dose_edges[1] and skew_normal_pdf(dose_edges[1], *popt) < vol_tol:  # all dose in first bin
+            dose_subvol[0] = 1
+        elif popt[1] > 2*dose_edges[1]:
+            dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
+            dose_subvol = skew_normal_pdf(dose_centers, *popt)
+        else:
+            for dose_bin, (d_lower, d_upper) in enumerate(zip(dose_edges[:-1], dose_edges[1:])):
+                integral = quad(skew_normal_pdf, d_lower, d_upper, args=popt)
+                dose_subvol[dose_bin] = integral[0]
+
+        if popt[0] > dose_edges[-1] or skew_normal_pdf(dose_edges[-1], *popt) > vol_tol:  # significant overflow
+            d_upper = popt[0] + 10*popt[1]
+            integral = quad(skew_normal_pdf, dose_edges[-1], d_upper, args=popt)
+            dose_subvol[-1] += integral[0]
+
+        if np.sum(dose_subvol) == 0:
+            logging.warning('Integrated PDF to zero! popt=', popt)
+
+        dose_subvol /= np.sum(dose_subvol)
+        return dose_subvol
 
     def score(self, X, y=None,
               metric_func='mean', metric_args=[], metric_label='metric',
