@@ -135,6 +135,7 @@ class Patient(object):
 
         self.structure_aliases = {}
         self.dose_aliases = {}
+        self.dose_scalefactors = {}
 
         config_fname = os.path.join(dicom_dir, 'config.json')
         if os.path.isfile(config_fname):
@@ -144,6 +145,8 @@ class Patient(object):
                 self.structure_aliases = config['structure_aliases']
             if 'dose_aliases' in config:
                 self.dose_aliases = config['dose_aliases']
+            if 'dose_scalefactors' in config:
+                self.dose_scalefactors = config['dose_scalefactors']
 
         result_fname = os.path.join(dicom_dir, 'intermediate-results.hdf5')
         self.results = h5py.File(result_fname, 'a')
@@ -187,7 +190,10 @@ class Patient(object):
     @translate_grid(2)
     @persistent_result('dose', (1, 2))
     def dose_array(self, dose_name, grid_name):
-        return self.dicom.dose_array(dose_name, grid_name).astype(np.float32)
+        dose = self.dicom.dose_array(dose_name, grid_name).astype(np.float32)
+        if dose_name in self.dose_scalefactors:
+            dose *= self.dose_scalefactors[dose_name]
+        return dose
 
     @translate_grid(1)
     def grid_vectors(self, name):
