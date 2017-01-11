@@ -12,7 +12,12 @@ class DicomRtDose(DicomBase):
         super(DicomRtDose, self).__init__(ds)
 
     def dose_name(self):
-        return self.ds.SeriesDescription
+        if 'SeriesDescription' not in self.ds:
+            return 'N/A'
+        elif self.ds.SeriesDescription == '':
+            return 'N/A'
+        else:
+            return self.ds.SeriesDescription
 
     @property
     def shape(self):
