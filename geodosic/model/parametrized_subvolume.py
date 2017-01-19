@@ -1,24 +1,19 @@
 # standard imports
 import os
+import logging
 import inspect
 from functools import wraps
 from math import ceil
-import logging
 
 # third-party imports
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import scipy.stats as ss
 from sklearn.base import BaseEstimator, RegressorMixin
+import scipy.stats as ss
 from scipy.optimize import curve_fit
-from scipy.interpolate import UnivariateSpline
 from scipy.integrate import quad
-from sklearn.metrics import r2_score
 
 # project imports
-from .geometry import distance_to_surface, bin_distance, interpolate_grids
-from .dvh import DVH
+from ..dvh import DVH
 
 
 def skew_normal_pdf(x, e=0, w=1, a=0):
@@ -51,17 +46,22 @@ def initialize_attributes(func):
     return wrapper
 
 
-class ShellDoseFitModel(BaseEstimator, RegressorMixin):
-    """docstring for DVHEstimator"""
+class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
-                 grid_name=None, shell_width=3.0,
+                 grid_name=None,
                  normalize_dose_to_target=True, max_prescribed_dose=None,
-                 min_shell_size_fit=10, min_structures_for_fit=2):
+                 min_subvolume_size_for_fit=10, min_structures_for_fit=2):
         pass
 
-    def fit(self, X, y=None, plot_shell_func=None, plot_structure_func=None, return_popt_all=False):
+    def clip_params(self, p0):
+        for i in range(len(p0)):
+            p0[i] = min(p0[i], self.p_upper[i])
+            p0[i] = max(p0[i], self.p_lower[i])
+        return p0
+
+    def fit(self, X, y=None, plot_params_path=None):
         """Train the model.
 
         Parameters:
@@ -72,8 +72,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         assert self.dose_name is not None
         assert self.oar_names is not None
         assert self.target_name is not None
-        assert self.shell_width > 0
-        assert self.min_shell_size_fit > 0
+        assert self.min_subvolume_size_for_fit > 0
         assert self.min_structures_for_fit > 0
 
         if not self.normalize_dose_to_target:
@@ -86,9 +85,6 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         if isinstance(self.oar_names, str):
             self.oar_names = [self.oar_names]
 
-        self.plot_shell_func = plot_shell_func
-        self.plot_structure_func = plot_structure_func
-
         # parameter bounds
         self.p_upper = [2, 1, 10]
         self.p_lower = [0, 1e-9, -10]
@@ -98,9 +94,10 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             self.p_upper[1] *= self.max_prescribed_dose
             self.p_lower[1] *= self.max_prescribed_dose
 
-        # fit dose shells for all patients
+        # fit subvolume DVHs for all structures
         self.failed_converge = 0
         self.attempt_converge = 0
+
         popt_all = []
         for p in X:
             for oar_name in self.oar_names:
@@ -108,54 +105,42 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         popt_all = [popt for popt in popt_all if popt is not None]
 
         if self.failed_converge > 0:
-            logging.warning('{0}/{1} fits failed to converge (instead used mean, std, skew)'.format(self.failed_converge, self.attempt_converge))
+            logging.warning('{0}/{1} fits failed to converge (used mean, std, skew instead)'.format(self.failed_converge, self.attempt_converge))
         del self.attempt_converge
         del self.failed_converge
 
-        # what range of shell distances were covered?
-        min_i = min(min(popt.keys()) for popt in popt_all)
-        max_i = max(max(popt.keys()) for popt in popt_all)
+        # compile list of subvolumes found in training set
+        subvolume_keys = set(key for popt in popt_all for key in popt.keys())
 
-        # compute average best-fit parameters for each shell
+        # average the subvolume parameters across structures
         self.popt_avg_, self.popt_std_ = {}, {}
-        for i in range(min_i, max_i+1):
-            if i == 0:
-                continue
+        for key in subvolume_keys:
 
-            popt_all_i = np.array([popt[i] for popt in popt_all if i in popt])
-            if popt_all_i.size == 0:
-                continue
+            popt_all_subvol = np.array([popt[key] for popt in popt_all if key in popt])
+            n_found_structures = popt_all_subvol.shape[0]
 
-            if popt_all_i.shape[0] < self.min_structures_for_fit:
-                continue
+            if n_found_structures >= self.min_structures_for_fit:
+                self.popt_avg_[key] = np.mean(popt_all_subvol, axis=0)
+                self.popt_std_[key] = np.std(popt_all_subvol, axis=0)
 
-            self.popt_avg_[i] = np.mean(popt_all_i, axis=0)
-            self.popt_std_[i] = np.std(popt_all_i, axis=0)
-
-        if return_popt_all:
-            return popt_all
-        else:
-            return self
-
-        del self.plot_shell_func
-        del self.plot_structure_func
-        del self.tmp_i_shell, self.tmp_anon_id, self.tmp_oar_name
+        if plot_params_path:
+            self.plot_params(plot_params_path, popt_all)
 
         return self
 
     def _fit_structure(self, p, oar_name):
         """Find correlations between dose and distance-to-target for a single
-        organ-at-risk structure. This method splits the dose array into shells
+        organ-at-risk structure. The dose array is split into subvolumes
         surrounding the target volume, and also selects only voxels within the
-        OAR. The actual fitting is handled by _fit_shell().
+        OAR. The actual fitting is handled by _fit_subvolume().
 
         Parameters:
             p: a patient object
             oar_name: string to identify the OAR structure in the patient
 
         Returns:
-            popt: dict of (i: popt_i) pairs, where popt_i is a tuple containing
-                the best-fit parameters for shell i
+            popt: dict of (name: popt) pairs, where popt is a tuple containing
+                the best-fit parameters for the subvolume called name
         """
         if self.dose_name not in p.dose_names:
             return
@@ -167,46 +152,30 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             logging.error('Could not find "%s" in %s' % (self.target_name, p.dicom_dir))
             return
 
-        _, self.tmp_anon_id = os.path.split(p.dicom_dir)
-        self.tmp_oar_name = oar_name
-
-        oar_mask = p.structure_mask(oar_name, self.grid_name)
-        dist = p.distance_to_surface(self.target_name, self.grid_name)
         dose = p.dose_array(self.dose_name, self.grid_name)
+        mask_oar = p.structure_mask(oar_name, self.grid_name)
+        dose_oar = dose[mask_oar]
 
         if self.normalize_dose_to_target:
-            target_mask = p.structure_mask(self.target_name, self.grid_name)
-            mean_target_dose = np.mean(dose[target_mask])
-            dose /= mean_target_dose
-
-        dose_oar = dose[oar_mask]
-        dist_oar = dist[oar_mask]
-        min_dist = np.amin(dist_oar)
-        max_dist = np.amax(dist_oar)
-        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
-
-        if self.plot_structure_func:
-            self.plot_structure_func(self, dose_oar, dist_oar)
+            mask_target = p.structure_mask(self.target_name, self.grid_name)
+            mean_dose_target = np.mean(dose[mask_target])
+            dose_oar /= mean_dose_target
 
         popt = {}
-        for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
+        for key, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
 
-            dose_shell = dose_oar[(dist_oar > inner) & (dist_oar <= outer)]
+            dose_subvolume = dose_oar[mask_subvolume]
 
-            if dose_shell.size < self.min_shell_size_fit:
-                continue
-
-            self.tmp_i_shell = i
-
-            popt[i] = self._fit_shell(dose_shell)
+            if dose_subvolume.size >= self.min_subvolume_size_for_fit:
+                popt[key] = self._fit_subvolume(dose_subvolume)
 
         if len(popt) == 0:
             popt = None
 
         return popt
 
-    def _fit_shell(self, dose):
-        """Fit the dose distribution within a shell.
+    def _fit_subvolume(self, dose):
+        """Fit the dose distribution within a subvolume.
 
         Parameters:
             dose: ndarray of dose (voxel selection already applied)
@@ -216,9 +185,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         """
         # initial estimate and bounds of parameter values
         p0 = [np.mean(dose), np.std(dose), ss.skew(dose)]
-        for i in range(len(p0)):
-            p0[i] = min(p0[i], self.p_upper[i])
-            p0[i] = max(p0[i], self.p_lower[i])
+        p0 = self.clip_params(p0)
 
         # if dose is uniform, there is no distribution to fit
         if np.all(dose == dose[0]):
@@ -251,6 +218,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         try:
             popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
                                    p0=p0, bounds=(self.p_lower, self.p_upper))
+            popt = self.clip_params(popt)
         except RuntimeError as e:
             # if convergence fails, just use initial parameters
             self.failed_converge += 1
@@ -265,24 +233,7 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             print(counts)
             raise e
 
-        if self.plot_shell_func:
-            self.plot_shell_func(self, bin_centers, counts, popt)
-
         return popt
-
-    def interpolate_popt(self):
-        i_shell = np.array(sorted(list(self.popt_avg_.keys())))
-        yp = zip(*(self.popt_avg_[i] for i in i_shell if i in self.popt_avg_))
-        dyp = zip(*(self.popt_std_[i] for i in i_shell if i in self.popt_std_))
-        x = np.where(i_shell > 0, self.shell_width*(i_shell-0.5), self.shell_width*(i_shell+0.5))
-
-        splines = []
-        for y, dy in zip(yp, dyp):
-            dy = np.clip(dy, 0.1*np.mean(dy), np.amax(dy))
-            weights = np.power(dy, -2)
-            splines.append(UnivariateSpline(x, y, w=weights, s=0.8))
-
-        return splines
 
     def predict(self, X, *args, **kwargs):
         if isinstance(self.oar_names, str):
@@ -295,76 +246,39 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return pred
 
     def predict_structure(self, p, oar_name, dose_edges=None,
-                          max_size_voxelwise=1000, vol_tol=1e-2):
+                          max_size_voxelwise=100, vol_tol=1e-2):
         if oar_name not in p.structure_names:
             return
         if self.target_name not in p.structure_names:
             return
 
-        min_fitted_i = min(self.popt_avg_.keys())
-        max_fitted_i = max(self.popt_avg_.keys())
-
-        oar_mask = p.structure_mask(oar_name, self.grid_name)
-        n_voxels_oar = np.count_nonzero(oar_mask)
-        dist = p.distance_to_surface(self.target_name, self.grid_name)
-        dist_oar = dist[oar_mask]
-        min_dist = np.amin(dist_oar)
-        max_dist = np.amax(dist_oar)
-
+        # Set up DVH binning
         if dose_edges is None:
             dose_edges = np.linspace(0., 1.2, 120)
             if not self.normalize_dose_to_target:
                 dose_edges *= self.max_prescribed_dose
-
         dose_struct = np.zeros_like(dose_edges[:-1])
 
-        oar_size = dist_oar.size
-        if oar_size <= max_size_voxelwise:
+        mask_oar = p.structure_mask(oar_name, self.grid_name)
+        size_oar = np.count_nonzero(mask_oar)
 
-            popt_splines = self.interpolate_popt()
-            min_fitted_dist = min_fitted_i * self.shell_width
-            max_fitted_dist = max_fitted_i * self.shell_width
+        if size_oar > max_size_voxelwise:
+            for key_subvolume, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
 
-            for dist_voxel in dist_oar:
-                if dist_voxel < min_fitted_dist:
-                    popt = self.popt_avg_[min_fitted_i]
-                elif dist_voxel > max_fitted_dist:
-                    popt = self.popt_avg_[max_fitted_i]
-                else:
-                    popt = [spline(dist_voxel) for spline in popt_splines]
-
-                for i in range(len(popt)):
-                    popt[i] = min(popt[i], self.p_upper[i])
-                    popt[i] = max(popt[i], self.p_lower[i])
-
-                dose_struct += self.predict_subvolume(tuple(popt), dose_edges, vol_tol)
-
-        else:
-            i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
-
-            for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
-
-                shell = (dist_oar > inner) & (dist_oar < outer)
-                n_voxels_shell = np.count_nonzero(shell)
-                if n_voxels_shell == 0:
+                size_subvolume = np.count_nonzero(mask_subvolume)
+                if size_subvolume == 0:
                     continue
 
-                if i < min_fitted_i:
-                    popt = self.popt_avg_[min_fitted_i]
-                elif i > max_fitted_i:
-                    popt = self.popt_avg_[max_fitted_i]
-                elif i not in self.popt_avg_:
-                    dist = 0.5 * (inner + outer)
-                    popt_splines = self.interpolate_popt()
-                    popt = [spline(dist) for spline in popt_splines]
-                else:
-                    popt = self.popt_avg_[i]
+                popt = self._get_subvolume_popt(key_subvolume)
+                dose_struct += size_subvolume * self.predict_subvolume(popt, dose_edges, vol_tol)
 
-                dose_struct += n_voxels_shell * self.predict_subvolume(tuple(popt), dose_edges, vol_tol)
+        else:  # voxel-wise
+            for popt in self._generate_popt_voxelwise(p, oar_name):
+                dose_struct += self.predict_subvolume(popt, dose_edges, vol_tol)
 
         # parametric fits yield long tails, but DVH requires last bin is zero
         if dose_struct[-1] > 0:
-            overflow_volume = dose_struct[-1] / n_voxels_oar
+            overflow_volume = dose_struct[-1] / size_oar
             if overflow_volume > vol_tol:
                 logging.warning('Predicted dose exceeds DVH domain ({0:.1%} of volume)'.format(overflow_volume))
             dose_struct[-2] += dose_struct[-1]
@@ -373,28 +287,41 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
         return DVH(dose_struct, dose_edges, dDVH=True)
 
     def predict_subvolume(self, popt, dose_edges, vol_tol):
-        dose_subvol = np.zeros_like(dose_edges[:-1])
+        """Predict the dose histogram for a subvolume. That is, integrate the
+        skew-normal distribution across histogram bins.
+
+        Parameters:
+            popt: skew-normal parameters
+            dose_edges: histogram bin edges
+            vol_tol: fractional volume tolerance (used to reduce computations
+                     and identify regions exceeding the maximum dose)
+
+        Returns:
+            dose_subvolume: dose histogram
+        """
+        popt = tuple(popt)
+        dose_subvolume = np.zeros_like(dose_edges[:-1])
 
         if popt[0] < dose_edges[1] and skew_normal_pdf(dose_edges[1], *popt) < vol_tol:  # all dose in first bin
-            dose_subvol[0] = 1
+            dose_subvolume[0] = 1
         elif popt[1] > 2*dose_edges[1]:
             dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
-            dose_subvol = skew_normal_pdf(dose_centers, *popt)
+            dose_subvolume = skew_normal_pdf(dose_centers, *popt)
         else:
             for dose_bin, (d_lower, d_upper) in enumerate(zip(dose_edges[:-1], dose_edges[1:])):
                 integral = quad(skew_normal_pdf, d_lower, d_upper, args=popt)
-                dose_subvol[dose_bin] = integral[0]
+                dose_subvolume[dose_bin] = integral[0]
 
         if popt[0] > dose_edges[-1] or skew_normal_pdf(dose_edges[-1], *popt) > vol_tol:  # significant overflow
             d_upper = popt[0] + 10*popt[1]
             integral = quad(skew_normal_pdf, dose_edges[-1], d_upper, args=popt)
-            dose_subvol[-1] += integral[0]
+            dose_subvolume[-1] += integral[0]
 
-        if np.sum(dose_subvol) == 0:
+        if np.sum(dose_subvolume) == 0:
             logging.warning('Integrated PDF to zero! popt=', popt)
 
-        dose_subvol /= np.sum(dose_subvol)
-        return dose_subvol
+        dose_subvolume /= np.sum(dose_subvolume)
+        return dose_subvolume
 
     def score(self, X, y=None,
               metric_func='mean', metric_args=[], metric_label='metric',
@@ -448,3 +375,42 @@ class ShellDoseFitModel(BaseEstimator, RegressorMixin):
             plt.axis([0, max_val, 0, max_val])
 
         return r2
+
+    def _generate_subvolume_masks(self, p, oar_name):
+        """Generate subvolume masks with unique keys.
+
+        Parameters:
+            p: Patient object
+            oar_name: string to identify the OAR structure in the patient
+
+        Returns:
+            key_subvolume: hashable ID
+            mask_subvolume: has shape of 1D OAR array (NOT 3D grid array)
+        """
+        raise NotImplementedError
+
+    def _get_subvolume_popt(self, key_subvolume):
+        """Get skew-normal parameters for a specific subvolume.
+
+        Parameters:
+            key_subvolume: hashable ID
+
+        Returns:
+            popt: skew-normal parameters
+        """
+        raise NotImplementedError
+
+    def _generate_popt_voxelwise(self, p, oar_name):
+        """Generate skew-normal parameters for each voxel in an OAR structure.
+
+        Parameters:
+            p: Patient object
+            oar_name: string to identify the OAR structure in the patient
+
+        Returns:
+            popt: skew-normal parameters
+        """
+        raise NotImplementedError
+
+    def plot_params(self, popt_all=None):
+        raise NotImplementedError
