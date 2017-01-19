@@ -11,6 +11,7 @@ from sklearn.base import BaseEstimator, RegressorMixin
 import scipy.stats as ss
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
+import matplotlib.pyplot as plt
 
 # project imports
 from ..dvh import DVH
@@ -362,7 +363,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                 y_pred.append(getattr(dvh_pred, metric_func)(*metric_args))
                 y_true.append(getattr(dvh_plan, metric_func)(*metric_args))
 
-        r2 = r2_score(y_true, y_pred)
+        r, _ = ss.pearsonr(y_true, y_pred)
 
         if plot:
             plt.scatter(y_true, y_pred, c='k')
@@ -370,11 +371,11 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
             plt.plot([0, max_val], [0, max_val], 'k:')
             plt.xlabel('Planned ' + metric_label)
             plt.ylabel('Predicted ' + metric_label)
-            plt.figtext(0.23, 0.8, '$R^2$ = {0:.1%}'.format(r2))
+            plt.figtext(0.23, 0.8, 'r = {0:.0%}'.format(r))
             plt.axis('square')
             plt.axis([0, max_val, 0, max_val])
 
-        return r2
+        return r
 
     def _generate_subvolume_masks(self, p, oar_name):
         """Generate subvolume masks with unique keys.
