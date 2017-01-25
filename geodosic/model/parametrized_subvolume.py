@@ -325,7 +325,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         return dose_subvolume
 
     def score(self, X, y=None,
-              metric_func='mean', metric_args=[], metric_label='metric',
+              metric_func=lambda dvh: dvh.mean(), metric_label='mean dose [Gy]',
               normalize=False, plot=False, **kwargs):
 
         if isinstance(self.oar_names, str):
@@ -360,8 +360,8 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                     dvh_plan.dose_edges /= norm_factor
                     dvh_pred.dose_edges /= norm_factor
 
-                y_pred.append(getattr(dvh_pred, metric_func)(*metric_args))
-                y_true.append(getattr(dvh_plan, metric_func)(*metric_args))
+                y_pred.append(metric_func(dvh_pred))
+                y_true.append(metric_func(dvh_plan))
 
         r, _ = ss.pearsonr(y_true, y_pred)
 
