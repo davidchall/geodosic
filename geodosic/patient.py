@@ -2,6 +2,7 @@
 import os.path
 from functools import wraps
 import json
+import logging
 
 # third-party imports
 import numpy as np
@@ -51,6 +52,8 @@ def persistent_result(func_key, i_keys):
             group = self.results.require_group(func_key)
             if result_key not in group:
                 result = func(self, *args, **kwargs)
+                if result is None:
+                    logging.warning('Unable to find data for %s in %s' % (result_key, self.results.filename))
                 group.create_dataset(result_key, data=result,
                     compression="gzip", compression_opts=9)
 
