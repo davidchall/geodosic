@@ -1,5 +1,4 @@
 # standard imports
-import os
 import logging
 import inspect
 from functools import wraps
@@ -12,6 +11,7 @@ import scipy.stats as ss
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
+from uncertainties import ufloat
 
 # project imports
 from ..dvh import DVH
@@ -324,7 +324,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         return dose_subvolume
 
     def score(self, X, y=None,
-              metric_func=lambda dvh: dvh.mean(), metric_label='mean dose [Gy]',
+              metric_func=lambda dvh: dvh.mean(), metric_label='metric',
               normalize=False, plot=False, **kwargs):
 
         if isinstance(self.oar_names, str):
@@ -361,15 +361,22 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                 y_pred.append(metric_func(dvh_pred))
                 y_true.append(metric_func(dvh_plan))
 
+        y_pred = np.array(y_pred)
+        y_true = np.array(y_true)
+        N = y_pred.size
+
+        error = y_pred - y_true
+        mean_error = ufloat(np.mean(error), np.std(error))
+
         r, _ = ss.pearsonr(y_true, y_pred)
 
         if plot:
             plt.scatter(y_true, y_pred, c='k')
-            max_val = 1.1*max(*y_true, *y_pred)
+            max_val = 1.1*max(y_true.max(), y_pred.max())
             plt.plot([0, max_val], [0, max_val], 'k:')
             plt.xlabel('Planned ' + metric_label)
             plt.ylabel('Predicted ' + metric_label)
-            plt.figtext(0.23, 0.8, 'r = {0:.0%}'.format(r))
+            plt.figtext(0.23, 0.85, 'N = {0}\nr = {1:.0%}\n{2:+.2uP}'.format(N, r, mean_error), va='top')
             plt.axis('square')
             plt.axis([0, max_val, 0, max_val])
 
