@@ -159,8 +159,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         if self.normalize_dose_to_target:
             mask_target = p.structure_mask(self.target_name, self.grid_name)
-            mean_dose_target = np.mean(dose[mask_target])
-            dose_oar /= mean_dose_target
+            dose_oar /= np.mean(dose[mask_target])
 
         popt = {}
         for key, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
@@ -341,15 +340,14 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
                 dose = p.dose_array(self.dose_name, self.dose_name)
                 target_mask = p.structure_mask(self.target_name, self.dose_name)
-                mean_target_dose = np.mean(dose[target_mask])
 
                 if self.normalize_dose_to_target:
-                    norm_factor = mean_target_dose
+                    norm_factor = np.mean(dose[target_mask])
                 else:
                     norm_factor = 1.0
 
                 # choose appropriate binning for DVHs
-                max_dvh_dose = 1.2 * mean_target_dose
+                max_dvh_dose = 1.2 * np.max(dose[target_mask])
                 dose_edges = np.linspace(0, max_dvh_dose, 200)
 
                 dvh_plan = p.calculate_dvh(oar_name, self.dose_name, dose_edges=dose_edges)
