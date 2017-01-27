@@ -21,7 +21,7 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
 
     def fit(self, *args, **kwargs):
         assert self.shell_width > 0
-        assert self.penumbra_width > 0
+        assert self.penumbra_width >= 0
         return super(CoplanarShellModel, self).fit(*args, **kwargs)
 
     def _generate_subvolume_masks(self, p, oar_name):
