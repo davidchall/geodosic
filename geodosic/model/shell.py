@@ -5,15 +5,19 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # project imports
-from .parametrized_subvolume import BaseParametrizedSubvolumeModel
+from .parametrized_subvolume import BaseParametrizedSubvolumeModel, initialize_attributes
 from ..geometry import bin_distance
 
 
 class ShellModel(BaseParametrizedSubvolumeModel):
 
-    def __init__(self, shell_width=3.0, *args, **kwargs):
-        super(ShellModel, self).__init__(*args, **kwargs)
-        self.shell_width = shell_width
+    @initialize_attributes
+    def __init__(self, dose_name=None, oar_names=None, target_name=None,
+                 grid_name=None,
+                 normalize_to_prescribed_dose=False, max_prescribed_dose=0,
+                 min_subvolume_size_for_fit=10, min_structures_for_fit=2,
+                 shell_width=3.0):
+        pass
 
     def fit(self, *args, **kwargs):
         assert self.shell_width > 0

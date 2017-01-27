@@ -150,6 +150,8 @@ class Patient(object):
                 self.dose_aliases = config['dose_aliases']
             if 'dose_scalefactors' in config:
                 self.dose_scalefactors = config['dose_scalefactors']
+            if 'prescribed_doses' in config:
+                self.prescribed_doses = config['prescribed_doses']
 
         result_fname = os.path.join(dicom_dir, 'intermediate-results.hdf5')
         self.results = h5py.File(result_fname, 'a')

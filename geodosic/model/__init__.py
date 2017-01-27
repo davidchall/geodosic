@@ -1,7 +1,7 @@
 from .shell import ShellModel
-from .shell_field import ShellFieldModel
+from .coplanar_shell import CoplanarShellModel
 
 __all__ = [
     'ShellModel',
-    'ShellFieldModel',
+    'CoplanarShellModel',
 ]

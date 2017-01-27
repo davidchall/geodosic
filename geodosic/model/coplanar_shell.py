@@ -5,21 +5,24 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # project imports
-from .parametrized_subvolume import BaseParametrizedSubvolumeModel
+from .parametrized_subvolume import BaseParametrizedSubvolumeModel, initialize_attributes
 from ..geometry import bin_distance
 
 
-class ShellFieldModel(BaseParametrizedSubvolumeModel):
+class CoplanarShellModel(BaseParametrizedSubvolumeModel):
 
-    def __init__(self, shell_width=3.0, penumbra_width=1.0, *args, **kwargs):
-        super(ShellFieldModel, self).__init__(*args, **kwargs)
-        self.shell_width = shell_width
-        self.penumbra_width = penumbra_width
+    @initialize_attributes
+    def __init__(self, dose_name=None, oar_names=None, target_name=None,
+                 grid_name=None,
+                 normalize_to_prescribed_dose=False, max_prescribed_dose=0,
+                 min_subvolume_size_for_fit=10, min_structures_for_fit=2,
+                 shell_width=3.0, penumbra_width=1.0):
+        pass
 
     def fit(self, *args, **kwargs):
         assert self.shell_width > 0
         assert self.penumbra_width > 0
-        return super(ShellFieldModel, self).fit(*args, **kwargs)
+        return super(CoplanarShellModel, self).fit(*args, **kwargs)
 
     def _generate_subvolume_masks(self, p, oar_name):
         mask_target = p.structure_mask(self.target_name, self.grid_name)

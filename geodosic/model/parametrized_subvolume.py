@@ -10,8 +10,6 @@ from sklearn.base import BaseEstimator, RegressorMixin
 import scipy.stats as ss
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
-import matplotlib.pyplot as plt
-from uncertainties import ufloat
 
 # project imports
 from ..dvh import DVH
@@ -52,7 +50,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
-                 normalize_dose_to_target=True, max_prescribed_dose=None,
+                 normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2):
         pass
 
@@ -76,9 +74,9 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         assert self.min_subvolume_size_for_fit > 0
         assert self.min_structures_for_fit > 0
 
-        if not self.normalize_dose_to_target:
-            if self.max_prescribed_dose is None:
-                raise AssertionError('Must set max_prescribed_dose if not normalizing to target (used in parameter bounds)')
+        if not self.normalize_to_prescribed_dose:
+            if self.max_prescribed_dose <= 0:
+                raise AssertionError('Must set max_prescribed_dose (used in parameter bounds)')
 
         if self.grid_name is None:
             self.grid_name = self.dose_name
@@ -89,7 +87,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         # parameter bounds
         self.p_upper = [2, 1, 10]
         self.p_lower = [0, 1e-9, -10]
-        if not self.normalize_dose_to_target:
+        if not self.normalize_to_prescribed_dose:
             self.p_upper[0] *= self.max_prescribed_dose
             self.p_lower[0] *= self.max_prescribed_dose
             self.p_upper[1] *= self.max_prescribed_dose
@@ -157,9 +155,8 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         mask_oar = p.structure_mask(oar_name, self.grid_name)
         dose_oar = dose[mask_oar]
 
-        if self.normalize_dose_to_target:
-            mask_target = p.structure_mask(self.target_name, self.grid_name)
-            dose_oar /= np.mean(dose[mask_target])
+        if self.normalize_to_prescribed_dose:
+            dose_oar /= p.prescribed_doses[self.dose_name]
 
         popt = {}
         for key, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
@@ -255,12 +252,20 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         # Set up DVH binning
         if dose_edges is None:
             dose_edges = np.linspace(0., 1.2, 120)
-            if not self.normalize_dose_to_target:
+            if self.normalize_to_prescribed_dose:
+                dose_edges *= p.prescribed_doses[self.dose_name]
+            else:
                 dose_edges *= self.max_prescribed_dose
-        dose_struct = np.zeros_like(dose_edges[:-1])
 
         mask_oar = p.structure_mask(oar_name, self.grid_name)
         size_oar = np.count_nonzero(mask_oar)
+
+        # normalize dose scale
+        if self.normalize_to_prescribed_dose:
+            dose_edges /= p.prescribed_doses[self.dose_name]
+
+        # accumulate dose histogram
+        dose_struct = np.zeros_like(dose_edges[:-1])
 
         if size_oar > max_size_voxelwise:
             for key_subvolume, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
@@ -270,11 +275,15 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                     continue
 
                 popt = self._get_subvolume_popt(key_subvolume)
-                dose_struct += size_subvolume * self.predict_subvolume(popt, dose_edges, vol_tol)
+                dose_struct += size_subvolume * self._predict_subvolume(popt, dose_edges, vol_tol)
 
         else:  # voxel-wise
             for popt in self._generate_popt_voxelwise(p, oar_name):
-                dose_struct += self.predict_subvolume(popt, dose_edges, vol_tol)
+                dose_struct += self._predict_subvolume(popt, dose_edges, vol_tol)
+
+        # restore dose scale
+        if self.normalize_to_prescribed_dose:
+            dose_edges *= p.prescribed_doses[self.dose_name]
 
         # parametric fits yield long tails, but DVH requires last bin is zero
         if dose_struct[-1] > 0:
@@ -286,7 +295,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         return DVH(dose_struct, dose_edges, dDVH=True)
 
-    def predict_subvolume(self, popt, dose_edges, vol_tol):
+    def _predict_subvolume(self, popt, dose_edges, vol_tol):
         """Predict the dose histogram for a subvolume. That is, integrate the
         skew-normal distribution across histogram bins.
 
@@ -312,7 +321,8 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                 integral = quad(skew_normal_pdf, d_lower, d_upper, args=popt)
                 dose_subvolume[dose_bin] = integral[0]
 
-        if popt[0] > dose_edges[-1] or skew_normal_pdf(dose_edges[-1], *popt) > vol_tol:  # significant overflow
+        # identify significant overflow and integrate
+        if popt[0] > dose_edges[-1] or skew_normal_pdf(dose_edges[-1], *popt) > vol_tol:
             d_upper = popt[0] + 10*popt[1]
             integral = quad(skew_normal_pdf, dose_edges[-1], d_upper, args=popt)
             dose_subvolume[-1] += integral[0]
@@ -320,67 +330,10 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         if np.sum(dose_subvolume) == 0:
             logging.warning('Integrated PDF to zero! popt=', popt)
 
+        # normalize histogram to probability density function
         dose_subvolume /= np.sum(dose_subvolume)
+
         return dose_subvolume
-
-    def score(self, X, y=None,
-              metric_func=lambda dvh: dvh.mean(), metric_label='metric',
-              normalize=False, plot=False, **kwargs):
-
-        if isinstance(self.oar_names, str):
-            self.oar_names = [self.oar_names]
-
-        y_true, y_pred = [], []  # metric evaluated
-        for p in X:
-            for oar_name in self.oar_names:
-                if oar_name not in p.structure_names or \
-                  self.target_name not in p.structure_names or \
-                  self.dose_name not in p.dose_names:
-                    continue
-
-                dose = p.dose_array(self.dose_name, self.dose_name)
-                target_mask = p.structure_mask(self.target_name, self.dose_name)
-
-                if self.normalize_dose_to_target:
-                    norm_factor = np.mean(dose[target_mask])
-                else:
-                    norm_factor = 1.0
-
-                # choose appropriate binning for DVHs
-                max_dvh_dose = 1.2 * np.max(dose[target_mask])
-                dose_edges = np.linspace(0, max_dvh_dose, 200)
-
-                dvh_plan = p.calculate_dvh(oar_name, self.dose_name, dose_edges=dose_edges)
-                dvh_pred = self.predict_structure(p, oar_name, dose_edges=dose_edges/norm_factor, **kwargs)
-                dvh_pred.dose_edges *= norm_factor
-
-                if normalize:
-                    dvh_plan.dose_edges /= norm_factor
-                    dvh_pred.dose_edges /= norm_factor
-
-                y_pred.append(metric_func(dvh_pred))
-                y_true.append(metric_func(dvh_plan))
-
-        y_pred = np.array(y_pred)
-        y_true = np.array(y_true)
-        N = y_pred.size
-
-        error = y_pred - y_true
-        mean_error = ufloat(np.mean(error), np.std(error))
-
-        r, _ = ss.pearsonr(y_true, y_pred)
-
-        if plot:
-            plt.scatter(y_true, y_pred, c='k')
-            max_val = 1.1*max(y_true.max(), y_pred.max())
-            plt.plot([0, max_val], [0, max_val], 'k:')
-            plt.xlabel('Planned ' + metric_label)
-            plt.ylabel('Predicted ' + metric_label)
-            plt.figtext(0.23, 0.85, 'N = {0}\nr = {1:.0%}\n{2:+.2uP}'.format(N, r, mean_error), va='top')
-            plt.axis('square')
-            plt.axis([0, max_val, 0, max_val])
-
-        return r
 
     def _generate_subvolume_masks(self, p, oar_name):
         """Generate subvolume masks with unique keys.
