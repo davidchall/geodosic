@@ -65,8 +65,9 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
     def _get_subvolume_popt(self, key_subvolume):
         (i, is_infield) = key_subvolume
 
-        min_fitted_i = min(k[0] for k in self.popt_avg_.keys())
-        max_fitted_i = max(k[0] for k in self.popt_avg_.keys())
+        fitted_i = [k[0] for k in self.popt_avg_.keys() if k[1] == is_infield]
+        min_fitted_i = min(fitted_i)
+        max_fitted_i = max(fitted_i)
 
         if i in self.popt_avg_:
             popt = self.popt_avg_[(i, is_infield)]
