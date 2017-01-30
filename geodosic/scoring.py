@@ -3,17 +3,7 @@ import numpy as np
 from sklearn.metrics import r2_score
 
 
-def score_dvh_metric(model, X, y=None,
-                     dvh_metric=lambda dvh: dvh.mean(),
-                     **kwargs):
-    """Scores the model by comparing a metric of the predicted and actual DVH.
-
-    Args:
-        X: cohort of Patient objects
-        dvh_metric: function that converts DVH into a metric
-    """
-
-    y_true, y_pred = [], []
+def generate_dvhs(model, X, **kwargs):
     for p in X:
         if model.dose_name not in p.dose_names:
             continue
@@ -40,9 +30,22 @@ def score_dvh_metric(model, X, y=None,
             dvh_pred = model.predict_structure(p, oar_name, dose_edges=dose_edges, **kwargs)
             dvh_plan = p.calculate_dvh(oar_name, model.dose_name, dose_edges=dose_edges)
 
-            y_pred.append(dvh_metric(dvh_pred))
-            y_true.append(dvh_metric(dvh_plan))
+            yield p, dvh_pred, dvh_plan
 
+
+def score_dvh_metric(model, X, y=None,
+                     dvh_metric=lambda dvh: dvh.mean(),
+                     **kwargs):
+    """Scores the model by comparing a metric of the predicted and actual DVH.
+
+    Args:
+        X: cohort of Patient objects
+        dvh_metric: function that converts DVH into a metric
+    """
+    y_true, y_pred = [], []
+    for p, dvh_pred, dvh_plan in generate_dvhs(model, X, **kwargs):
+        y_pred.append(dvh_metric(dvh_pred))
+        y_true.append(dvh_metric(dvh_plan))
     y_pred = np.array(y_pred)
     y_true = np.array(y_true)
 
