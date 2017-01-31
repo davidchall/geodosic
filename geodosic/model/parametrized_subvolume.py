@@ -72,8 +72,8 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         assert self.dose_name is not None
         assert self.oar_names is not None
         assert self.target_name is not None
-        assert self.min_subvolume_size_for_fit > 0
-        assert self.min_structures_for_fit > 0
+        assert self.min_subvolume_size_for_fit >= 0
+        assert self.min_structures_for_fit >= 0
 
         if not self.normalize_to_prescribed_dose:
             if self.max_prescribed_dose <= 0:
