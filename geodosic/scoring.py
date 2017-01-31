@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import r2_score
 
 
-def generate_dvhs(model, X, n_dose_bins=200, **kwargs):
+def generate_dvhs(model, X, n_dose_bins=100, **kwargs):
     for p in X:
         if model.dose_name not in p.dose_names:
             continue
