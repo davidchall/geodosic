@@ -9,8 +9,10 @@ requirements = [
     'numpy',
     'scipy',
     'matplotlib',
+    'scikit-learn>=0.18'
+    'joblib',
+    'h5py',
     'mahotas',
-    'msgpack-numpy>=0.3.7',
 ]
 
 setup(
