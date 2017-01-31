@@ -14,6 +14,7 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2,
                  shell_width=3.0, penumbra_width=1.0):

@@ -50,6 +50,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2):
         pass
@@ -158,18 +159,22 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         if self.normalize_to_prescribed_dose:
             dose_oar /= p.prescribed_doses[self.dose_name]
 
-        popt = {}
-        for key, mask_subvolume in self._generate_subvolume_masks(p, oar_name):
+        subvolumes = ((k, m) for k, m in self._generate_subvolume_masks(p, oar_name) if np.count_nonzero(m) >= self.min_subvolume_size_for_fit)
 
-            dose_subvolume = dose_oar[mask_subvolume]
-
-            if dose_subvolume.size >= self.min_subvolume_size_for_fit:
-                popt[key] = self._fit_subvolume(dose_subvolume)
+        if self.n_jobs > 0:
+            from joblib import Parallel, delayed
+            popt_list = Parallel(n_jobs=self.n_jobs)(delayed(self._fit_subvolume_wrapper)(k, dose_oar[m]) for k, m in subvolumes)
+            popt = {k: v for k, v in popt_list}
+        else:
+            popt = {k: self._fit_subvolume(dose_oar[m]) for k, m in subvolumes}
 
         if len(popt) == 0:
             popt = None
 
         return popt
+
+    def _fit_subvolume_wrapper(self, key, dose):
+        return key, self._fit_subvolume(dose)
 
     def _fit_subvolume(self, dose):
         """Fit the dose distribution within a subvolume.
