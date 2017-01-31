@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import r2_score
 
 
-def generate_dvhs(model, X, **kwargs):
+def generate_dvhs(model, X, n_dose_bins=200, **kwargs):
     for p in X:
         if model.dose_name not in p.dose_names:
             continue
@@ -25,7 +25,7 @@ def generate_dvhs(model, X, **kwargs):
                 max_target_dose_pred = model.max_prescribed_dose
 
             max_dvh_dose = max(max_target_dose_plan, max_target_dose_pred)
-            dose_edges = np.linspace(0, 1.2*max_dvh_dose, 200)
+            dose_edges = np.linspace(0, 1.2*max_dvh_dose, n_dose_bins)
 
             dvh_pred = model.predict_structure(p, oar_name, dose_edges=dose_edges, **kwargs)
             dvh_plan = p.calculate_dvh(oar_name, model.dose_name, dose_edges=dose_edges)
