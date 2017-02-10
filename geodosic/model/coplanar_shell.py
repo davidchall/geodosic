@@ -53,41 +53,41 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
 
             # in-field
             mask_subvolume = mask_shell & mask_infield
-            key_subvolume = (i, True)
+            key_subvolume = (i, 'In-field')
             if np.count_nonzero(mask_subvolume):
                 yield key_subvolume, mask_subvolume
 
             # out-of-field
             mask_subvolume = mask_shell & ~mask_infield
-            key_subvolume = (i, False)
+            key_subvolume = (i, 'Out-of-field')
             if np.count_nonzero(mask_subvolume):
                 yield key_subvolume, mask_subvolume
 
     def _get_subvolume_popt(self, key_subvolume):
-        (i, is_infield) = key_subvolume
+        (i_sv, o_sv) = key_subvolume
 
-        fitted_i = [k[0] for k in self.popt_avg_.keys() if k[1] == is_infield]
+        fitted_i = [i for i, o in self.popt_avg_.keys() if o == o_sv]
         min_fitted_i = min(fitted_i)
         max_fitted_i = max(fitted_i)
 
-        if i in self.popt_avg_:
-            popt = self.popt_avg_[(i, is_infield)]
-        elif i < min_fitted_i:
-            popt = self.popt_avg_[(min_fitted_i, is_infield)]
-        elif i > max_fitted_i:
-            popt = self.popt_avg_[(max_fitted_i, is_infield)]
+        if i_sv in self.popt_avg_:
+            popt = self.popt_avg_[(i_sv, o_sv)]
+        elif i_sv < min_fitted_i:
+            popt = self.popt_avg_[(min_fitted_i, o_sv)]
+        elif i_sv > max_fitted_i:
+            popt = self.popt_avg_[(max_fitted_i, o_sv)]
         else:
-            dist = self.shell_width * np.where(i > 0, (i-0.5), (i+0.5))
+            dist = self.shell_width * np.where(i_sv > 0, (i_sv-0.5), (i_sv+0.5))
 
-            popt_splines = self.interpolate_popt(is_infield)
+            popt_splines = self.interpolate_popt(o_sv)
             popt = popt_splines(dist)
 
         return popt
 
-    def interpolate_popt(self, is_infield, smooth=0.8):
-        i_shell = np.array(sorted(list(k[0] for k in self.popt_avg_.keys() if k[1] == is_infield)))
-        yp = zip(*(self.popt_avg_[(i, is_infield)] for i in i_shell))
-        dyp = zip(*(self.popt_std_[(i, is_infield)] for i in i_shell))
+    def interpolate_popt(self, key_other, smooth=0.8):
+        i_shell = np.array(sorted(list(i for i, o in self.popt_avg_.keys() if o == key_other)))
+        yp = zip(*(self.popt_avg_[(i, key_other)] for i in i_shell))
+        dyp = zip(*(self.popt_std_[(i, key_other)] for i in i_shell))
         x = self.shell_width * np.where(i_shell > 0, (i_shell-0.5), (i_shell+0.5))
 
         splines = []
@@ -101,14 +101,14 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
     def plot_params(self, filename, popt_all=None, spline_smooth=0.8):
         pp = PdfPages(filename)
 
-        infield_options = [True, False]
+        key_other_options = set(o for i, o in self.popt_avg_.keys())
 
-        for is_infield in infield_options:
+        for key_other in key_other_options:
 
-            i_shell = np.array(sorted(list(k[0] for k in self.popt_avg_.keys() if k[1] == is_infield)))
-            yp = zip(*(self.popt_avg_[(i, is_infield)] for i in i_shell))
-            dyp = zip(*(self.popt_std_[(i, is_infield)] for i in i_shell))
+            i_shell = np.array(sorted(list(i for i, o in self.popt_avg_.keys() if o == key_other)))
             x = self.shell_width * np.where(i_shell > 0, (i_shell-0.5), (i_shell+0.5))
+            yp = zip(*(self.popt_avg_[(i, key_other)] for i in i_shell))
+            dyp = zip(*(self.popt_std_[(i, key_other)] for i in i_shell))
 
             min_i = i_shell.min()
             max_i = i_shell.max()
@@ -117,7 +117,7 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
             max_xs = self.shell_width*max_i if max_i > 0 else self.shell_width*(max_i+1)
             xs = np.linspace(min_xs, max_xs, 100)
 
-            splines = self.interpolate_popt(is_infield, smooth=spline_smooth)
+            splines = self.interpolate_popt(key_other, smooth=spline_smooth)
 
             for param, (ys, y, dy) in enumerate(zip(splines(xs), yp, dyp)):
 
@@ -128,21 +128,22 @@ class CoplanarShellModel(BaseParametrizedSubvolumeModel):
                 plt.plot(xs, ys)
                 plt.xlabel('Distance-to-target [mm]')
                 plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
-                plt.title('In-field' if is_infield else 'Out-of-field')
+                plt.title(key_other)
 
                 pp.savefig()
                 plt.clf()
 
-            if popt_all:
+        if popt_all:
+            for key_other in key_other_options:
                 for param in range(3):
                     for popt in popt_all:
-                        i_shell = np.array(sorted(list(k[0] for k in popt.keys() if k[1] == is_infield)))
-                        y = np.array([popt[(i, is_infield)][param] for i in i_shell])
+                        i_shell = np.array(sorted(list(i for i, o in popt.keys() if o == key_other)))
+                        y = np.array([popt[(i, key_other)][param] for i in i_shell])
                         x = self.shell_width * np.where(i_shell > 0, (i_shell-0.5), (i_shell+0.5))
                         plt.plot(x, y, 'o', markeredgewidth=0.0)
                         plt.xlabel('Distance-to-target [mm]')
                         plt.ylabel('Parameter estimate $\\theta_{{{0}}}$'.format(param+1))
-                        plt.title('In-field' if is_infield else 'Out-of-field')
+                        plt.title(key_other)
 
                     pp.savefig()
                     plt.clf()
