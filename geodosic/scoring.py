@@ -3,7 +3,15 @@ import numpy as np
 from sklearn.metrics import r2_score
 
 
-def generate_dvhs(model, X, n_dose_bins=100, **kwargs):
+def generate_validation_dvhs(model, X, n_dose_bins=100, **kwargs):
+    """Generates predicted and planned DVHs for model validation.
+
+    Args:
+        model
+        X: validation cohort of Patient objects
+        n_dose_bins: resolution of DVH
+        kwargs: passed to model.predict_structure
+    """
     for p in X:
         if model.dose_name not in p.dose_names:
             continue
@@ -35,18 +43,26 @@ def generate_dvhs(model, X, n_dose_bins=100, **kwargs):
 
 def score_dvh_metric(model, X, y=None,
                      dvh_metric=lambda dvh: dvh.mean(),
+                     dvh_generator=generate_validation_dvhs,
+                     score_metric=r2_score,
                      **kwargs):
     """Scores the model by comparing a metric of the predicted and actual DVH.
 
     Args:
+        model: estimator
         X: cohort of Patient objects
         dvh_metric: function that converts DVH into a metric
+        dvh_generator: function that generates predicted and planned DVHs
+        score_metric:
+
+    Returns:
+        score: floating point number that quantifies the prediction quality
     """
     y_true, y_pred = [], []
-    for p, dvh_pred, dvh_plan in generate_dvhs(model, X, **kwargs):
+    for _, dvh_pred, dvh_plan in dvh_generator(model, X, **kwargs):
         y_pred.append(dvh_metric(dvh_pred))
         y_true.append(dvh_metric(dvh_plan))
     y_pred = np.array(y_pred)
     y_true = np.array(y_true)
 
-    return r2_score(y_true, y_pred)
+    return score_metric(y_true, y_pred)
