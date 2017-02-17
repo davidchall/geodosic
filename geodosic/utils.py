@@ -1,3 +1,7 @@
+# standard imports
+import inspect
+from functools import wraps
+
 _missing = object()
 
 
@@ -15,6 +19,7 @@ class lazy_property(object):
 
     The class has to have a `__dict__` in order for this property to work.
     """
+
     # http://stackoverflow.com/a/17487613/2669425
     def __init__(self, func, name=None, doc=None):
         self.__name__ = name or func.__name__
@@ -30,3 +35,21 @@ class lazy_property(object):
             value = self.func(obj)
             obj.__dict__[self.__name__] = value
         return value
+
+
+def initialize_attributes(func):
+    """Decorator that automatically assigns parameters to attributes."""
+    names, varargs, keywords, defaults = inspect.getargspec(func)
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        for name, arg in list(zip(names[1:], args)) + list(kwargs.items()):
+            setattr(self, name, arg)
+
+        for name, default in zip(reversed(names), reversed(defaults)):
+            if not hasattr(self, name):
+                setattr(self, name, default)
+
+        func(self, *args, **kwargs)
+
+    return wrapper

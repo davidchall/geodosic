@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # project imports
-from .parametrized_subvolume import BaseParametrizedSubvolumeModel, initialize_attributes
+from .parametrized_subvolume import BaseParametrizedSubvolumeModel
+from ..utils import initialize_attributes
 from ..geometry import bin_distance
 
 

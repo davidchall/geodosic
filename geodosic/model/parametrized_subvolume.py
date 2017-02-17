@@ -1,7 +1,5 @@
 # standard imports
 import logging
-import inspect
-from functools import wraps
 from math import ceil
 
 # third-party imports
@@ -12,6 +10,7 @@ from scipy.optimize import curve_fit
 from scipy.integrate import quad
 
 # project imports
+from ..utils import initialize_attributes
 from ..dvh import DVH
 
 
@@ -25,24 +24,6 @@ def skew_normal_pdf(x, e=0, w=1, a=0):
     """
     t = (x-e) / w
     return 2 / w * ss.norm.pdf(t) * ss.norm.cdf(a*t)
-
-
-def initialize_attributes(func):
-    """Decorator that automatically assigns parameters to attributes."""
-    names, varargs, keywords, defaults = inspect.getargspec(func)
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        for name, arg in list(zip(names[1:], args)) + list(kwargs.items()):
-            setattr(self, name, arg)
-
-        for name, default in zip(reversed(names), reversed(defaults)):
-            if not hasattr(self, name):
-                setattr(self, name, default)
-
-        func(self, *args, **kwargs)
-
-    return wrapper
 
 
 class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
