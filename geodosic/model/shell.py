@@ -201,23 +201,13 @@ class CoplanarShellModel(ShellModel):
         grid = p.grid_vectors(self.grid_name)
         _, _, z = np.meshgrid(*grid, indexing='ij')
         z_target = z[mask_target]
-        z_oar = z[mask_oar]
         z_threshold_sup = z_target.max() + self.penumbra_width
         z_threshold_inf = z_target.min() - self.penumbra_width
 
+        z_oar = z[mask_oar]
         mask_infield = (z_oar <= z_threshold_sup) & (z_oar >= z_threshold_inf)
 
-        # distance-to-target needed to construct shells
-        dist = p.distance_to_surface(self.target_name, self.grid_name)
-        dist_oar = dist[mask_oar]
-
-        min_dist = np.amin(dist_oar)
-        max_dist = np.amax(dist_oar)
-        i_shell, dist_edges = bin_distance(min_dist, max_dist, self.shell_width)
-
-        for i, inner, outer in zip(i_shell, dist_edges[:-1], dist_edges[1:]):
-
-            mask_shell = (dist_oar > inner) & (dist_oar <= outer)
+        for (i, _), mask_shell in super(CoplanarShellModel, self)._generate_subvolume_masks(p, oar_name):
 
             # in-field
             mask_subvolume = mask_shell & mask_infield
