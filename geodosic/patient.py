@@ -130,6 +130,7 @@ class Patient(object):
     class, and this allows these two classes to be used interchangeably in
     plotting and estimator routines.
     """
+
     def __init__(self, dicom_dir):
 
         if not os.path.isdir(dicom_dir):
@@ -172,6 +173,10 @@ class Patient(object):
         return set(self.structure_aliases.keys()) | self.dicom.structure_names
 
     @translate_struct(1)
+    def structure_volume(self, struct_name):
+        return self.dicom.structure_volume(struct_name)
+
+    @translate_struct(1)
     @translate_grid(2)
     @persistent_result('structure_mask', (1, 2))
     def structure_mask(self, struct_name, grid_name):
@@ -199,6 +204,10 @@ class Patient(object):
         if dose_name in self.dose_scalefactors:
             dose *= self.dose_scalefactors[dose_name]
         return dose
+
+    @translate_grid(1)
+    def grid_shape(self, name):
+        return self.dicom.grid_shape(name)
 
     @translate_grid(1)
     def grid_vectors(self, name):

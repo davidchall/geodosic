@@ -105,6 +105,13 @@ class DicomCollection(object):
         else:
             return 'custom'
 
+    def structure_volume(self, struct_name):
+        index = self._find_structure(struct_name)
+        if index is None:
+            return None
+        else:
+            return self.rtss[index].structure_volume(struct_name)
+
     def structure_mask(self, struct_name, grid_name):
         index = self._find_structure(struct_name)
         grid = self.grid_vectors(grid_name)
@@ -118,6 +125,10 @@ class DicomCollection(object):
         grid_spacing = self.grid_spacing(grid_name)
 
         return distance_to_surface(mask, grid_spacing)
+
+    def grid_shape(self, grid_name):
+        x, y, z = self.grid_vectors(grid_name)
+        return len(x), len(y), len(z)
 
     def grid_vectors(self, grid_name):
         if grid_name.lower() == 'default':
