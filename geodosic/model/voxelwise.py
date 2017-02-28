@@ -3,17 +3,32 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
-class FeatureExtractor(BaseEstimator, TransformerMixin):
+class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
 
     def __init__(self, features, mask=None):
-        """
+        """Transformer that extracts voxel-wise features from a cohort of
+        Patient objects and returns a pandas.DataFrame object. Each row
+        corresponds to a voxel (patients are tracked by 'Patient ID' feature).
+        Voxel selection criteria are supported by the mask argument.
 
-        FeatureExtractor([
-            ('dist_target', MinDistanceToStructure(grid_name=grid_name, struct_name=target_name)),
-            ('dist_target2', 'dist_target**2')
-        ],
-            mask='dist_target < 10'
-        )
+        Example:
+            VoxelFeatureExtractor([
+                ('dist_target', MinDistanceToStructure(grid_name, target_name)),
+                ('dist_target2', 'dist_target**2')
+            ],
+                mask='0 < dist_target < 10'
+            )
+
+        Args:
+            features: list of 2-tuples like (feature_name, feature_func) where
+                feature_func is either:
+                    - function called on each Patient object
+                    - expression using other feature_name variables
+
+            mask: Boolean expression using feature_name variables
+
+        Note: expressions using feature_name variables use pandas.eval()
+        http://pandas.pydata.org/pandas-docs/stable/enhancingperf.html#expression-evaluation-via-eval-experimental
         """
         self.feature_funcs, self.feature_eqns = [], []
         for name, f in features:
@@ -23,6 +38,14 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.mask = mask
 
     def transform(self, X):
+        """Extracts features from a cohort of Patient objects.
+
+        Args:
+            X: list of Patient objects
+
+        Returns:
+            df: DataFrame of features
+        """
         dfs = []
         for i, p in enumerate(X):
             df = self.extract(p)
@@ -32,19 +55,31 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return pd.concat(dfs)
 
     def extract(self, p):
-        # create DataFrame of features
+        """Extracts features from a single Patient object.
+
+        Args:
+            p: Patient object
+
+        Returns:
+            df: DataFrame of features
+        """
         df = pd.DataFrame({name: func(p) for name, func in self.feature_funcs})
         for name, eqn in self.feature_eqns:
             df.eval('%s = %s' % (name, eqn), inplace=True)
 
-        # apply mask criteria
         if self.mask:
             df = df.query(self.mask)
 
         return df
 
 
-class MyEstimator(BaseEstimator):
+class VoxelEstimator(BaseEstimator):
+    """Used to estimate a voxel-wise target (e.g. dose) based upon features of
+    the voxel. Although the features and targets are voxel-wise, the input data
+    remains patient-wise. It is important that this estimator maintains an
+    interface where X is a list of Patient objects, for sub-sampling and
+    sorting purposes. This is achieved using a VoxelFeatureExtractor class.
+    """
 
     def __init__(self, extractor, features, target, estimator):
         self.extractor = extractor
