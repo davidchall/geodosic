@@ -10,7 +10,7 @@ from .features import StructureMask
 
 class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
 
-    def __init__(self, features, mask=None):
+    def __init__(self, features, grid_name, mask=None):
         """Transformer that extracts voxel-wise features from a cohort of
         Patient objects and returns a pandas.DataFrame object. Each row
         corresponds to a voxel (patients are tracked by 'Patient ID' feature).
@@ -18,9 +18,10 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
 
         Example:
             VoxelFeatureExtractor([
-                ('dist_target', MinDistanceToStructure(grid_name, target_name)),
+                ('dist_target', MinDistanceToStructure(target_name)),
                 ('dist_target2', 'dist_target**2')
             ],
+                grid_name=dose_name,
                 mask='0 < dist_target < 10'
             )
 
@@ -30,12 +31,14 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
                     - function called on each Patient object
                     - expression using other feature_name variables
 
+            grid_name: grid upon which voxel features are extracted
             mask: Boolean expression using feature_name variables
 
         Note: expressions using feature_name variables use pandas.eval()
         http://pandas.pydata.org/pandas-docs/stable/enhancingperf.html#expression-evaluation-via-eval-experimental
         """
         self.features = features
+        self.grid_name = grid_name
         self.mask = mask
 
     def transform(self, X):
@@ -69,7 +72,7 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
             target = feature_eqns if isinstance(f, str) else feature_funcs
             target.append((name, f))
 
-        df = pd.DataFrame({name: func(p) for name, func in feature_funcs})
+        df = pd.DataFrame({name: func(p, self.grid_name) for name, func in feature_funcs})
         for name, eqn in feature_eqns:
             df.eval('%s = %s' % (name, eqn), inplace=True)
 
@@ -77,6 +80,19 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
             df = df.query(self.mask)
 
         return df
+
+    def clone_with_structure_mask(self, struct_name, keep_train_mask=False):
+        other = clone(self)
+
+        mask_name = 'temporary_mask'
+        other.features.append((mask_name, StructureMask(struct_name)))
+
+        if keep_train_mask:
+            other.mask = self.mask + ' and ' + mask_name
+        else:
+            other.mask = mask_name
+
+        return other
 
 
 class VoxelEstimator(BaseEstimator):
@@ -129,27 +145,17 @@ class VoxelEstimator(BaseEstimator):
         else:
             return self.estimator.fit(Xt, yt, **fit_params).transform(Xt)
 
-    def predict(self, X, struct_name=None, grid_name=None, keep_train_mask=False):
+    def predict(self, X, struct_name=None, keep_train_mask=False):
         if struct_name:
-            extractor_train = self.extractor
-            self.extractor = clone(extractor_train)
+            extractor = self.extractor.clone_with_structure_mask(struct_name, keep_train_mask)
+        else:
+            extractor = self.extractor
 
-            new_mask = 'temporary_mask'
-            if keep_train_mask:
-                self.extractor.mask = self.extractor.mask + ' and ' + new_mask
-            else:
-                self.extractor.mask = new_mask
-            self.extractor.features.append((new_mask, StructureMask(grid_name, struct_name)))
-
-        df = self.extractor.transform(X)
+        df = extractor.transform(X)
         Xt = df[self.features]
 
         y_pred = self.estimator.predict(Xt)
         y_pred = y_pred.clip(min=0)
-
-        # restore extractor settings
-        if struct_name:
-            self.extractor = extractor_train
 
         return y_pred
 
@@ -177,7 +183,7 @@ class VoxelEstimator(BaseEstimator):
                 continue
 
             dvh_plan = p.calculate_dvh(oar_name, dose_name)
-            dose_pred = self.predict([p])
+            dose_pred = self.predict([p], oar_name)
 
             max_dvh_dose = 1.2*max(dvh_plan.dose_edges[-1], dose_pred.max())
             dose_edges = np.linspace(0, max_dvh_dose, n_dose_bins)
