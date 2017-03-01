@@ -1,6 +1,10 @@
 # third-party imports
+import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
+
+# project imports
+from ..dvh import DVH
 
 
 class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
@@ -142,3 +146,27 @@ class VoxelEstimator(BaseEstimator):
         y_pred = y_pred.clip(min=0)
 
         return y_pred
+
+    def generate_validation_dvhs(self, X, oar_name, dose_name, n_dose_bins=100):
+        """Generates predicted and planned DVHs for model validation.
+
+        Args:
+            X: validation cohort of Patient objects
+            n_dose_bins: resolution of DVH
+        """
+        for p in X:
+            if dose_name not in p.dose_names:
+                continue
+            if oar_name not in p.structure_names:
+                continue
+
+            dvh_plan = p.calculate_dvh(oar_name, dose_name)
+            dose_pred = self.predict([p])
+
+            max_dvh_dose = 1.2*max(dvh_plan.dose_edges[-1], dose_pred.max())
+            dose_edges = np.linspace(0, max_dvh_dose, n_dose_bins)
+
+            dvh_pred = DVH.from_raw(dose_pred, dose_edges=dose_edges)
+            dvh_plan = p.calculate_dvh(oar_name, dose_name, dose_edges=dose_edges)
+
+            yield p, dvh_pred, dvh_plan

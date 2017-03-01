@@ -322,6 +322,42 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         return dose_subvolume
 
+    def generate_validation_dvhs(self, X, n_dose_bins=100, **kwargs):
+        """Generates predicted and planned DVHs for model validation.
+
+        Args:
+            X: validation cohort of Patient objects
+            n_dose_bins: resolution of DVH
+            kwargs: passed to model.predict_structure
+        """
+        for p in X:
+            if self.dose_name not in p.dose_names:
+                continue
+            if self.target_name not in p.structure_names:
+                continue
+
+            for oar_name in self.oar_names:
+                if oar_name not in p.structure_names:
+                    continue
+
+                # choose appropriate binning for DVHs
+                dose = p.dose_array(self.dose_name, self.dose_name)
+                target_mask = p.structure_mask(self.target_name, self.dose_name)
+                max_target_dose_plan = np.max(dose[target_mask])
+
+                if self.normalize_to_prescribed_dose:
+                    max_target_dose_pred = p.prescribed_doses[self.dose_name]
+                else:
+                    max_target_dose_pred = self.max_prescribed_dose
+
+                max_dvh_dose = 1.2*max(max_target_dose_plan, max_target_dose_pred)
+                dose_edges = np.linspace(0, max_dvh_dose, n_dose_bins)
+
+                dvh_pred = self.predict_structure(p, oar_name, dose_edges=dose_edges, **kwargs)
+                dvh_plan = p.calculate_dvh(oar_name, self.dose_name, dose_edges=dose_edges)
+
+                yield p, dvh_pred, dvh_plan
+
     def _generate_subvolume_masks(self, p, oar_name):
         """Generate subvolume masks with unique keys.
 
