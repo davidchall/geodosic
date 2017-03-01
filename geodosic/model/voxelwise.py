@@ -30,11 +30,7 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
         Note: expressions using feature_name variables use pandas.eval()
         http://pandas.pydata.org/pandas-docs/stable/enhancingperf.html#expression-evaluation-via-eval-experimental
         """
-        self.feature_funcs, self.feature_eqns = [], []
-        for name, f in features:
-            target = self.feature_eqns if isinstance(f, str) else self.feature_funcs
-            target.append((name, f))
-
+        self.features = features
         self.mask = mask
 
     def transform(self, X):
@@ -63,8 +59,13 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
         Returns:
             df: DataFrame of features
         """
-        df = pd.DataFrame({name: func(p) for name, func in self.feature_funcs})
-        for name, eqn in self.feature_eqns:
+        feature_funcs, feature_eqns = [], []
+        for name, f in self.features:
+            target = feature_eqns if isinstance(f, str) else feature_funcs
+            target.append((name, f))
+
+        df = pd.DataFrame({name: func(p) for name, func in feature_funcs})
+        for name, eqn in feature_eqns:
             df.eval('%s = %s' % (name, eqn), inplace=True)
 
         if self.mask:
