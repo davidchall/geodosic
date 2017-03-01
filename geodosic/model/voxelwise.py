@@ -1,10 +1,11 @@
 # third-party imports
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 
 # project imports
 from ..dvh import DVH
+from .features import StructureMask
 
 
 class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
@@ -128,12 +129,27 @@ class VoxelEstimator(BaseEstimator):
         else:
             return self.estimator.fit(Xt, yt, **fit_params).transform(Xt)
 
-    def predict(self, X):
+    def predict(self, X, struct_name=None, grid_name=None, keep_train_mask=False):
+        if struct_name:
+            extractor_train = self.extractor
+            self.extractor = clone(extractor_train)
+
+            new_mask = 'temporary_mask'
+            if keep_train_mask:
+                self.extractor.mask = self.extractor.mask + ' and ' + new_mask
+            else:
+                self.extractor.mask = new_mask
+            self.extractor.features.append((new_mask, StructureMask(grid_name, struct_name)))
+
         df = self.extractor.transform(X)
         Xt = df[self.features]
 
         y_pred = self.estimator.predict(Xt)
         y_pred = y_pred.clip(min=0)
+
+        # restore extractor settings
+        if struct_name:
+            self.extractor = extractor_train
 
         return y_pred
 
