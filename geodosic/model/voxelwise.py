@@ -192,3 +192,21 @@ class VoxelEstimator(BaseEstimator):
             dvh_plan = p.calculate_dvh(oar_name, dose_name, dose_edges=dose_edges)
 
             yield p, dvh_pred, dvh_plan
+
+    def generate_validation_dose_arrays(self, X):
+        for p in X:
+            df = self.extractor.transform(X)
+            Xt = df[self.features]
+            yt = df[self.target]
+
+            grid = p.grid_vectors(self.extractor.grid_name)
+            grid_shape = p.grid_shape(self.extractor.grid_name)
+
+            dose_pred = np.zeros(grid_shape)
+            dose_pred.put(df.index.values, self.estimator.predict(Xt))
+            dose_pred = dose_pred.clip(min=0)
+
+            dose_plan = np.zeros(grid_shape)
+            dose_plan.put(df.index.values, yt)
+
+            yield p, grid, dose_pred, dose_plan
