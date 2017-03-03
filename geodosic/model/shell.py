@@ -47,6 +47,8 @@ class ShellModel(BaseParametrizedSubvolumeModel):
         (i_sv, o_sv) = key_subvolume
 
         fitted_i = [i for i, o in self.popt_avg_.keys() if o == o_sv]
+        if len(fitted_i) == 0:
+            raise ValueError('Unable to find parameters for subvolume: %s' % o_sv)
         min_fitted_i = min(fitted_i)
         max_fitted_i = max(fitted_i)
 
