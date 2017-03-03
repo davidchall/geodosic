@@ -215,17 +215,10 @@ def plot_overlay(scan, grid_scan, overlay, grid_overlay, i_scan, view,
 
         cm_overlay = cm.jet
         if invisible_zero:
-            if np.amin(slice_overlay) < 0:
-                logging.warning('The invisible_zero option should not be used '
-                    'when the overlay contains negative values.')
-            cm_overlay.set_under('k', alpha=0)
-            slice_overlay = slice_overlay.copy()
-            slice_overlay[slice_overlay == 0] = -1
+            cm_overlay.set_bad('k', alpha=0)
+            slice_overlay = np.ma.masked_where(slice_overlay == 0, slice_overlay)
 
         cax = ax.pcolorfast(X, Y, slice_overlay, alpha=alpha, cmap=cm_overlay, vmin=min_overlay, vmax=max_overlay)
-        if invisible_zero:
-            clim = cax.get_clim()
-            cax.set_clim((0, clim[1]))
         if cbar_overlay:
             cbar = add_colorbar(cax)
             cbar.solids.set(alpha=1.0)
