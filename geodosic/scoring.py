@@ -1,3 +1,6 @@
+# standard imports
+import warnings
+
 # third-party imports
 import numpy as np
 from sklearn.metrics import r2_score
@@ -52,6 +55,10 @@ def score_gamma_index(model, X, y=None,
     pass_rates = []
     for p, grid, dose_pred, dose_plan in model.generate_validation_dose_arrays(X, **kwargs):
 
+        if np.all(dose_plan == 0):
+            warnings.warn('Skipping patient with D_ref=0', RuntimeWarning)
+            continue
+
         abs_dose_threshold = dose_threshold / 100. * dose_plan.max()
 
         gamma = calc_gamma(
@@ -63,7 +70,9 @@ def score_gamma_index(model, X, y=None,
             num_threads=n_jobs)
 
         valid_gamma = gamma[~np.isnan(gamma)]
-        pass_rates.append(np.sum(valid_gamma <= 1) / len(valid_gamma))
+        pass_rate = np.sum(valid_gamma <= 1) / len(valid_gamma)
+
+        pass_rates.append(pass_rate)
 
     pass_rates = np.array(pass_rates)
 
