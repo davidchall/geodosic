@@ -195,7 +195,7 @@ class VoxelEstimator(BaseEstimator):
 
     def generate_validation_dose_arrays(self, X):
         for p in X:
-            df = self.extractor.transform(X)
+            df = self.extractor.transform([p])
             Xt = df[self.features]
             yt = df[self.target]
 
