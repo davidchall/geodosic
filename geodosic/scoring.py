@@ -67,6 +67,7 @@ def score_gamma_index(model, X, y=None,
             distance_threshold, abs_dose_threshold,
             lower_dose_cutoff=1e-12,
             maximum_test_distance=2*distance_threshold,
+            max_concurrent_calc_points=30000000,  # <2 GB memory usage
             num_threads=n_jobs)
 
         valid_gamma = gamma[~np.isnan(gamma)]
