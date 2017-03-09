@@ -84,6 +84,26 @@ class AzimuthalAngle(BaseVoxelFeature):
         return np.arctan2(y, x)
 
 
+class ZFromStructure(BaseVoxelFeature):
+
+    def __init__(self, struct_name):
+        self.struct_name = struct_name
+
+    def extract(self, p, grid_name):
+        grid = p.grid_vectors(grid_name)
+        _, _, z = np.meshgrid(*grid, indexing='ij')
+
+        struct_mask = p.structure_mask(self.struct_name, grid_name)
+        z_struct = z[struct_mask]
+        z_sup = z_struct.max()
+        z_inf = z_struct.min()
+
+        result = np.zeros_like(z)
+        result[z > z_sup] = (z - z_sup)[z > z_sup]
+        result[z < z_inf] = (z - z_inf)[z < z_inf]
+        return result
+
+
 class StructureVolume(BasePatientFeature):
 
     def __init__(self, struct_name):
