@@ -182,14 +182,17 @@ class VoxelEstimator(BaseEstimator):
             if oar_name not in p.structure_names:
                 continue
 
-            dvh_plan = p.calculate_dvh(oar_name, dose_name)
+            dose_plan = p.dose_array(dose_name, dose_name)
+            oar_mask = p.structure_mask(oar_name, dose_name)
+            dose_plan = dose_plan[oar_mask]
+
             dose_pred = self.predict([p], oar_name)
 
-            max_dvh_dose = 1.2*max(dvh_plan.dose_edges[-1], dose_pred.max())
+            max_dvh_dose = 1.2*max(dose_plan.max(), dose_pred.max())
             dose_edges = np.linspace(0, max_dvh_dose, n_dose_bins)
 
             dvh_pred = DVH.from_raw(dose_pred, dose_edges=dose_edges)
-            dvh_plan = p.calculate_dvh(oar_name, dose_name, dose_edges=dose_edges)
+            dvh_plan = DVH.from_raw(dose_plan, dose_edges=dose_edges)
 
             yield p, dvh_pred, dvh_plan
 
