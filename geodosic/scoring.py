@@ -32,6 +32,16 @@ def score_dvh_metric(model, X, y=None,
     return score_metric(y_true, y_pred)
 
 
+def score_voxel_metric(model, X, y=None,
+                       score_metric=r2_score,
+                       **kwargs):
+
+    y_pred = model.predict(X)
+    y_true = model.extract_target(X)
+
+    return score_metric(y_true, y_pred)
+
+
 def score_gamma_index(model, X, y=None,
                       dose_threshold=3, distance_threshold=3,
                       return_raw=False,
