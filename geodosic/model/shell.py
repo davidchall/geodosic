@@ -1,6 +1,7 @@
 # third-party imports
 import numpy as np
 from scipy.interpolate import UnivariateSpline
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -15,6 +16,7 @@ class ShellModel(BaseParametrizedSubvolumeModel):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 distn=norm, p_lower=None, p_upper=None,
                  n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2,
@@ -118,7 +120,7 @@ class ShellModel(BaseParametrizedSubvolumeModel):
 
         if popt_all:
             for key_other in key_other_options:
-                for param in range(3):
+                for param in range(self.distn.numargs + 2):
                     for popt in popt_all:
                         i_shell = np.array(sorted(list(i for i, o in popt.keys() if o == key_other)))
                         y = np.array([popt[(i, key_other)][param] for i in i_shell])
@@ -145,6 +147,7 @@ class SimpleShellModel(ShellModel):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 distn=norm, p_lower=None, p_upper=None,
                  n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2,
@@ -186,6 +189,7 @@ class CoplanarShellModel(ShellModel):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 distn=norm, p_lower=None, p_upper=None,
                  n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2,

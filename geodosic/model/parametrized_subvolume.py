@@ -1,29 +1,14 @@
 # standard imports
 import logging
-from math import ceil
 
 # third-party imports
 import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
-import scipy.stats as ss
-from scipy.optimize import curve_fit
-from scipy.integrate import quad
+from scipy.stats import norm
 
 # project imports
 from ..utils import initialize_attributes
 from ..dvh import DVH
-
-
-def skew_normal_pdf(x, e=0, w=1, a=0):
-    """PDF for skew-normal distribution.
-
-    Parameters:
-        e: location
-        w: scale
-        a: shape
-    """
-    t = (x-e) / w
-    return 2 / w * ss.norm.pdf(t) * ss.norm.cdf(a*t)
 
 
 class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
@@ -31,16 +16,17 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
                  grid_name=None,
+                 distn=norm, p_lower=None, p_upper=None,
                  n_jobs=1,
                  normalize_to_prescribed_dose=False, max_prescribed_dose=0,
                  min_subvolume_size_for_fit=10, min_structures_for_fit=2):
         pass
 
-    def clip_params(self, p0):
-        for i in range(len(p0)):
-            p0[i] = min(p0[i], self.p_upper[i])
-            p0[i] = max(p0[i], self.p_lower[i])
-        return p0
+    def clip_params(self, params):
+        for i, _ in enumerate(params):
+            params[i] = max(params[i], self.p_lower[i])
+            params[i] = min(params[i], self.p_upper[i])
+        return params
 
     def fit(self, X, y=None, plot_params_path=None):
         """Train the model.
@@ -68,28 +54,18 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
             self.oar_names = [self.oar_names]
 
         # parameter bounds
-        self.p_upper = [2, 1, 10]
-        self.p_lower = [0, 1e-9, -10]
-        if not self.normalize_to_prescribed_dose:
-            self.p_upper[0] *= self.max_prescribed_dose
-            self.p_lower[0] *= self.max_prescribed_dose
-            self.p_upper[1] *= self.max_prescribed_dose
-            self.p_lower[1] *= self.max_prescribed_dose
+        if not self.p_lower:
+            self.p_lower = [-np.inf] * (self.distn.numargs + 2)
+            self.p_lower[-1] = 1e-9
+        if not self.p_upper:
+            self.p_upper = [+np.inf] * (self.distn.numargs + 2)
 
         # fit subvolume DVHs for all structures
-        self.failed_converge = 0
-        self.attempt_converge = 0
-
         popt_all = []
         for p in X:
             for oar_name in self.oar_names:
                 popt_all.append(self._fit_structure(p, oar_name))
         popt_all = [popt for popt in popt_all if popt is not None]
-
-        if self.failed_converge > 0:
-            logging.warning('{0}/{1} fits failed to converge (used mean, std, skew instead)'.format(self.failed_converge, self.attempt_converge))
-        del self.attempt_converge
-        del self.failed_converge
 
         # compile list of subvolumes found in training set
         subvolume_keys = set(key for popt in popt_all for key in popt.keys())
@@ -167,55 +143,15 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
         Returns:
             popt: tuple of best-fit parameters
         """
-        # initial estimate and bounds of parameter values
-        p0 = [np.mean(dose), np.std(dose), ss.skew(dose)]
-        p0 = self.clip_params(p0)
 
         # if dose is uniform, there is no distribution to fit
         if np.all(dose == dose[0]):
-            return p0
-
-        # bin the data and add empty bins at either end to constrain fit
-        min_bin_width = 1e-5
-        max_n_bins = 100
-        if np.all(dose == dose[0]):
-            bin_edges = [dose[0], dose[0]+min_bin_width]
+            popt = [0] * (self.distn.numargs + 2)
+            popt[-2] = dose[0]
         else:
-            min_dose, max_dose = np.amin(dose), np.amax(dose)
-            q75, q25 = np.percentile(dose, [75, 25])
-            bin_width = 2 * (q75-q25) / np.power(dose.size, 1./3.)
-            bin_width = max(bin_width, min_bin_width)
-            n_bins = ceil((max_dose-min_dose) / bin_width)
-            n_bins = min(n_bins, max_n_bins-2)
-            bin_edges = np.linspace(min_dose, max_dose+np.finfo(float).eps, n_bins+1)
+            popt = self.distn.fit(dose)
 
-        # add empty bins at either end to further constrain fit
-        bin_edges = np.insert(bin_edges, 0, 2*bin_edges[0]-bin_edges[1])
-        bin_edges = np.append(bin_edges, 2*bin_edges[-1]-bin_edges[-2])
-
-        counts, bin_edges = np.histogram(dose, bin_edges, density=True)
-        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-
-        self.attempt_converge += 1
-
-        # fit data
-        try:
-            popt, pcov = curve_fit(skew_normal_pdf, bin_centers, counts,
-                                   p0=p0, bounds=(self.p_lower, self.p_upper))
-            popt = self.clip_params(popt)
-        except RuntimeError as e:
-            # if convergence fails, just use initial parameters
-            self.failed_converge += 1
-            popt = p0
-
-        except Exception as e:
-            print(dose.size)
-            print(bin_edges.size)
-            print(counts.size)
-            print(dose)
-            print(bin_edges)
-            print(counts)
-            raise e
+        popt = self.clip_params(list(popt))
 
         return popt
 
@@ -262,7 +198,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                     continue
 
                 popt = self._get_subvolume_popt(key_subvolume)
-                dose_struct += size_subvolume * self._predict_subvolume(popt, dose_edges, vol_tol)
+                dose_struct += size_subvolume * self._discretize_probability(self.distn, dose_edges, popt)
 
         else:  # voxel-wise
             for popt in self._generate_popt_voxelwise(p, oar_name):
@@ -282,45 +218,36 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         return DVH(dose_struct, dose_edges, dDVH=True)
 
-    def _predict_subvolume(self, popt, dose_edges, vol_tol):
-        """Predict the dose histogram for a subvolume. That is, integrate the
-        skew-normal distribution across histogram bins.
+    @staticmethod
+    def _discretize_probability(distn, x_edges, params):
+        """Integrates a probability distribution across a set of intervals.
+
+        Note: underflow and overflow are folded into first and last intervals.
 
         Parameters:
-            popt: skew-normal parameters
-            dose_edges: histogram bin edges
-            vol_tol: fractional volume tolerance (used to reduce computations
-                     and identify regions exceeding the maximum dose)
+            distn: continuous probability distribution (implements cdf method)
+            x_edges: set of interval edges
+            params: distribution parameters
 
         Returns:
-            dose_subvolume: dose histogram
+            prob: probability of each interval
         """
-        popt = tuple(popt)
-        dose_subvolume = np.zeros_like(dose_edges[:-1])
+        cdf = distn.cdf(x_edges, *params)
 
-        if popt[0] < dose_edges[1] and skew_normal_pdf(dose_edges[1], *popt) < vol_tol:  # all dose in first bin
-            dose_subvolume[0] = 1
-        elif popt[1] > 2*dose_edges[1]:
-            dose_centers = 0.5 * (dose_edges[1:] + dose_edges[:-1])
-            dose_subvolume = skew_normal_pdf(dose_centers, *popt)
-        else:
-            for dose_bin, (d_lower, d_upper) in enumerate(zip(dose_edges[:-1], dose_edges[1:])):
-                integral = quad(skew_normal_pdf, d_lower, d_upper, args=popt)
-                dose_subvolume[dose_bin] = integral[0]
+        underflow = cdf[0]
+        overflow = 1 - cdf[-1]
 
-        # identify significant overflow and integrate
-        if popt[0] > dose_edges[-1] or skew_normal_pdf(dose_edges[-1], *popt) > vol_tol:
-            d_upper = popt[0] + 10*popt[1]
-            integral = quad(skew_normal_pdf, dose_edges[-1], d_upper, args=popt)
-            dose_subvolume[-1] += integral[0]
+        prob = np.diff(cdf)
+        prob[0] += underflow
+        prob[-1] += overflow
 
-        if np.sum(dose_subvolume) == 0:
-            logging.warning('Integrated PDF to zero! popt=', popt)
+        # FPE can cause negative probabilities
+        prob = np.maximum(prob, 0)
 
-        # normalize histogram to probability density function
-        dose_subvolume /= np.sum(dose_subvolume)
+        # FPE can de-normalize probability
+        prob /= np.sum(prob)
 
-        return dose_subvolume
+        return prob
 
     def generate_validation_dvhs(self, X, n_dose_bins=100, **kwargs):
         """Generates predicted and planned DVHs for model validation.
