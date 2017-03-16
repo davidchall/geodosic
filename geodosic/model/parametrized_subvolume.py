@@ -202,7 +202,7 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         else:  # voxel-wise
             for popt in self._generate_popt_voxelwise(p, oar_name):
-                dose_struct += self._predict_subvolume(popt, dose_edges, vol_tol)
+                dose_struct += self._discretize_probability(self.distn, dose_edges, popt)
 
         # restore dose scale
         if self.normalize_to_prescribed_dose:
