@@ -37,6 +37,15 @@ class DVH(object):
             if self.dose_edges[0] != 0:
                 raise ValueError('First dose edge must correspond to zero dose.')
 
+    @staticmethod
+    def choose_dose_edges(max_dose, n_bins=100):
+        eps = np.finfo(float).eps
+        dose_edges, binwidth = np.linspace(0, (1+eps)*max_dose + eps, n_bins,
+                                           retstep=True)
+        dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
+
+        return dose_edges
+
     @classmethod
     def from_raw(cls, voxel_data, dose_edges, skip_checks=False):
         return cls(*np.histogram(voxel_data, bins=dose_edges), dDVH=True,

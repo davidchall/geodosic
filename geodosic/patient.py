@@ -231,10 +231,7 @@ class Patient(object):
             struct_dose /= np.mean(dose[norm_mask])
 
         if dose_edges is None:
-            eps = np.finfo(float).eps
-            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(struct_dose)+eps,
-                                               200, retstep=True)
-            dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
+            dose_edges = DVH.choose_dose_edges(struct_dose.max())
 
         return DVH.from_raw(struct_dose, dose_edges)
 
@@ -251,10 +248,7 @@ class Patient(object):
         surface_dose = dose[struct_surface]
 
         if dose_edges is None:
-            eps = np.finfo(float).eps
-            dose_edges, binwidth = np.linspace(0, (1+eps)*np.amax(surface_dose)+eps,
-                                               200, retstep=True)
-            dose_edges = np.append(dose_edges, (dose_edges[-1] + binwidth))
+            dose_edges = DVH.choose_dose_edges(surface_dose.max())
 
         return DVH.from_raw(surface_dose, dose_edges)
 

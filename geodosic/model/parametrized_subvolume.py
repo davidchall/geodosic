@@ -174,11 +174,12 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
 
         # Set up DVH binning
         if dose_edges is None:
-            dose_edges = np.linspace(0., 1.2, 120)
             if self.normalize_to_prescribed_dose:
-                dose_edges *= p.prescribed_doses[self.dose_name]
+                max_dose_expected = p.prescribed_doses[self.dose_name]
             else:
-                dose_edges *= self.max_prescribed_dose
+                max_dose_expected = self.max_prescribed_dose
+            max_dose_dvh = 1.2 * max_dose_expected
+            dose_edges = DVH.choose_dose_edges(max_dose_dvh)
 
         mask_oar = p.structure_mask(oar_name, self.grid_name)
         size_oar = np.count_nonzero(mask_oar)
@@ -270,15 +271,15 @@ class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
                 # choose appropriate binning for DVHs
                 dose = p.dose_array(self.dose_name, self.dose_name)
                 target_mask = p.structure_mask(self.target_name, self.dose_name)
-                max_target_dose_plan = np.max(dose[target_mask])
+                max_dose_target = dose[target_mask].max()
 
                 if self.normalize_to_prescribed_dose:
-                    max_target_dose_pred = p.prescribed_doses[self.dose_name]
+                    max_dose_expected = p.prescribed_doses[self.dose_name]
                 else:
-                    max_target_dose_pred = self.max_prescribed_dose
+                    max_dose_expected = self.max_prescribed_dose
 
-                max_dvh_dose = 1.2*max(max_target_dose_plan, max_target_dose_pred)
-                dose_edges = np.linspace(0, max_dvh_dose, n_dose_bins)
+                max_dose_dvh = max(max_dose_target, 1.2*max_dose_expected)
+                dose_edges = DVH.choose_dose_edges(max_dose_dvh, n_dose_bins)
 
                 dvh_pred = self.predict_structure(p, oar_name, dose_edges=dose_edges, **kwargs)
                 dvh_plan = p.calculate_dvh(oar_name, self.dose_name, dose_edges=dose_edges)
