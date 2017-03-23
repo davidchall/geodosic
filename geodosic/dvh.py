@@ -60,11 +60,10 @@ class DVH(object):
         if np.amax(volumes) != 0:
             volumes = volumes / np.amax(volumes)
         self._cDVH = volumes
-        self._dDVH = np.append(np.diff(volumes[::-1])[::-1], volumes[-1])
 
     @property
     def dDVH(self):
-        return self._dDVH
+        return np.append(np.diff(self.cDVH[::-1])[::-1], self.cDVH[-1])
 
     @dDVH.setter
     def dDVH(self, volumes):
