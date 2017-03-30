@@ -9,6 +9,7 @@ class LKBModel(object):
     Lyman (1985) Radiat Res Suppl, 8, S13
     Kutcher, Burman et al (1991) Int J Radiat Oncol Biol Phys, 21, 137
     """
+
     def __init__(self, TD50, m, n):
         """Instantiate LKB NTCP model.
 
@@ -34,6 +35,7 @@ class RelativeSerialityModel(object):
 
     Kallman, Agren, Brahme (1992) Int J Radiat Biol, 62, 249
     """
+
     def __init__(self, D50, gamma, s):
         """Instantiate relative seriality NTCP model.
 
@@ -63,6 +65,7 @@ class LogisticDVHMetricModel(object):
 
     Bentzen, Tucker (1997) Int J Radiat Biol, 71, 531
     """
+
     def __init__(self, D50, gamma50, metric_func):
         """Instantiate logistic NTCP model using single DVH metric.
 
