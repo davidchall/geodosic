@@ -11,7 +11,7 @@ from ..utils import initialize_attributes
 from ..dvh import DVH
 
 
-class BaseParametrizedSubvolumeModel(BaseEstimator, RegressorMixin):
+class AverageSubvolumeModelBase(BaseEstimator, RegressorMixin):
 
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,

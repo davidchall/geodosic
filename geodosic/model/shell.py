@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # project imports
-from .parametrized_subvolume import BaseParametrizedSubvolumeModel
+from .subvolume import AverageSubvolumeModelBase
 from ..utils import initialize_attributes
 from ..geometry import bin_distance
 
 
-class ShellModel(BaseParametrizedSubvolumeModel):
+class ShellModel(AverageSubvolumeModelBase):
 
     @initialize_attributes
     def __init__(self, dose_name=None, oar_names=None, target_name=None,
