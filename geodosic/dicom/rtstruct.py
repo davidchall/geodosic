@@ -88,7 +88,8 @@ class DicomRtStruct(DicomBase):
                 continue
 
             z_closest_plane = z_planes[np.fabs(z_planes - z_i).argmin()]
-            if np.fabs(z - z_closest_plane).argmin() != i:
+            tmp = np.fabs(z - z_closest_plane)
+            if i not in np.argwhere(tmp == tmp.min()):
                 continue
 
             contours_list = planes[z_closest_plane]
