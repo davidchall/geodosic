@@ -53,7 +53,7 @@ class VoxelFeatureExtractor(BaseEstimator, TransformerMixin):
         dfs = []
         for i, p in enumerate(X):
             df = self.extract(p)
-            df.insert(len(df.columns), 'Patient ID', i)
+            df.insert(len(df.columns), 'PatientID', i)
             dfs.append(df)
 
         return pd.concat(dfs)
