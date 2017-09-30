@@ -40,7 +40,7 @@ class DicomCt(DicomBase):
         """
         dx, dy = self.ds.PixelSpacing
         dz = self.ds.SliceThickness
-        return dx, dy, dz
+        return float(dx), float(dy), float(dz)
 
     def HU_array(self):
 

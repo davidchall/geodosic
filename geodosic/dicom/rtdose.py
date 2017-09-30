@@ -53,7 +53,7 @@ class DicomRtDose(DicomBase):
         """
         dx, dy = self.ds.PixelSpacing
         dz = np.min(np.diff(self.ds.GridFrameOffsetVector))
-        return dx, dy, dz
+        return float(dx), float(dy), dz
 
     def is_regular_grid(self):
         """Return whether grid has regular spacing."""
