@@ -24,9 +24,9 @@ setup(
     url='https://github.com/davidchall/geodosic',
     packages=[
         'geodosic',
+        'geodosic.dicom',
+        'geodosic.model',
     ],
-    package_dir={'geodosic':
-                 'geodosic'},
     install_requires=requirements,
     test_suite='tests'
 )
